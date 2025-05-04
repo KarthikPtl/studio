@@ -1,7 +1,7 @@
 'use server';
 
 /**
- * @fileOverview A Genkit flow to extract text from an image, optimized for math expressions.
+ * @fileOverview A Genkit flow to extract text from an image, optimized for math expressions, including handwritten ones.
  *
  * - extractMathText - A function that takes an image data URI and returns the extracted text.
  * - ExtractMathTextInput - The input type for the extractMathText function.
@@ -15,7 +15,7 @@ const ExtractMathTextInputSchema = z.object({
   imageDataUri: z
     .string()
     .describe(
-      "An image of a math expression, as a data URI that must include a MIME type and use Base64 encoding. Expected format: 'data:<mimetype>;base64,<encoded_data>'."
+      "An image containing a math expression (printed or handwritten), as a data URI that must include a MIME type and use Base64 encoding. Expected format: 'data:<mimetype>;base64,<encoded_data>'."
     ),
 });
 export type ExtractMathTextInput = z.infer<typeof ExtractMathTextInputSchema>;
@@ -23,7 +23,7 @@ export type ExtractMathTextInput = z.infer<typeof ExtractMathTextInputSchema>;
 const ExtractMathTextOutputSchema = z.object({
   extractedText: z
     .string()
-    .describe('The text extracted from the math expression image, or "NO_TEXT_FOUND" if none could be reliably extracted.'),
+    .describe('The mathematical text extracted from the image, or "NO_TEXT_FOUND" if no clear mathematical expression could be reliably identified.'),
 });
 export type ExtractMathTextOutput = z.infer<typeof ExtractMathTextOutputSchema>;
 
@@ -38,7 +38,7 @@ const prompt = ai.definePrompt({
       imageDataUri: z
         .string()
         .describe(
-          "An image of a math expression, as a data URI that must include a MIME type and use Base64 encoding. Expected format: 'data:<mimetype>;base64,<encoded_data>'."
+          "An image containing a math expression (printed or handwritten), as a data URI that must include a MIME type and use Base64 encoding. Expected format: 'data:<mimetype>;base64,<encoded_data>'."
         ),
     }),
   },
@@ -46,20 +46,36 @@ const prompt = ai.definePrompt({
     schema: z.object({
       extractedText: z
         .string()
-        .describe('The text extracted from the math expression image, or "NO_TEXT_FOUND" if none could be reliably extracted.'),
+        .describe('The mathematical text extracted from the image, or "NO_TEXT_FOUND" if no clear mathematical expression could be reliably identified.'),
     }),
   },
   model: 'googleai/gemini-pro-vision', // Use Vision model
-  prompt: `Carefully analyze the provided image and extract any mathematical expression present.
-Focus ONLY on the mathematical characters, symbols, numbers, and variables (like x, y, etc.).
-Ignore any surrounding text, background elements, or handwriting that is not part of a clear mathematical expression.
+  prompt: `Analyze the provided image VERY carefully to identify and extract ANY mathematical expression present. This includes printed text AND handwritten equations.
+
+Prioritize extracting:
+- Numbers (0-9)
+- Mathematical operators (+, -, *, /, =, <, >, ≤, ≥, ±, etc.)
+- Variables (x, y, z, a, b, c, etc.)
+- Parentheses, brackets, braces ({}, [], ())
+- Exponents and subscripts (e.g., x^2, y_1)
+- Common mathematical functions (sin, cos, log, sqrt, etc.)
+- Fraction bars
+
+Your goal is to extract ONLY the core mathematical expression(s).
+IGNORE everything else:
+- Surrounding non-mathematical text (e.g., question numbers, instructions, names).
+- Decorative elements, backgrounds, paper lines, shadows.
+- Unclear or illegible scribbles that are not part of a recognizable math expression.
+
+If the image contains a clear mathematical expression (even if messy handwriting or slightly blurry), output ONLY the extracted expression text. Be precise.
+Example: If image shows "Solve: 2x + 5 = 15", output "2x + 5 = 15".
+Example: If image shows a handwritten "y = mx + b", output "y = mx + b".
+
+If NO clear mathematical expression can be reliably identified after thorough analysis (e.g., the image is completely blank, extremely blurry, or contains only non-math content), output the exact string "NO_TEXT_FOUND". Do not guess if uncertain.
 
 Image: {{media url=imageDataUri}}
 
-If a clear mathematical expression is found, output ONLY the extracted text.
-If no mathematical expression can be reliably extracted (e.g., image is blurry, unclear, or contains no math), output the exact string "NO_TEXT_FOUND".
-
-Extracted Text:`,
+Extracted Mathematical Text:`,
 });
 
 const extractMathTextFlow = ai.defineFlow<
@@ -79,6 +95,12 @@ const extractMathTextFlow = ai.defineFlow<
   }
   // Trim whitespace just in case
   output.extractedText = output.extractedText.trim();
+
+   // Add a check for empty string after trim
+  if (output.extractedText === "") {
+    console.warn("OCR flow returned an empty string after trimming. Defaulting to NO_TEXT_FOUND.");
+    return { extractedText: "NO_TEXT_FOUND" };
+  }
 
   return output;
 });
