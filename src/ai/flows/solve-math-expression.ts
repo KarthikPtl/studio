@@ -22,7 +22,7 @@ export type SolveMathExpressionInput = z.infer<typeof SolveMathExpressionInputSc
 const SolveMathExpressionOutputSchema = z.object({
   solution: z
     .string()
-    .describe('A detailed, step-by-step solution to the mathematical expression, formatted in Markdown. Includes clear steps and the final answer(s), or a specific explanation if it cannot be solved. Uses easy-to-read notation like superscripts (x², y³) and the square root symbol (√).'),
+    .describe('A detailed, step-by-step solution to the mathematical expression, formatted in Markdown. Includes clear steps and the final answer(s), or a specific explanation if it cannot be solved. Uses easy-to-read notation like superscripts (x², y³) and the square root symbol (√), using parentheses √(...) for clarity when the radicand has multiple terms.'),
 });
 export type SolveMathExpressionOutput = z.infer<typeof SolveMathExpressionOutputSchema>;
 
@@ -43,7 +43,7 @@ const prompt = ai.definePrompt({
     schema: z.object({
       solution: z
         .string()
-        .describe('A detailed, step-by-step solution to the mathematical expression, formatted in Markdown. Includes clear steps and the final answer(s), or a specific explanation if it cannot be solved. Uses easy-to-read notation like superscripts (x², y³) and the square root symbol (√).'),
+        .describe('A detailed, step-by-step solution to the mathematical expression, formatted in Markdown. Includes clear steps and the final answer(s), or a specific explanation if it cannot be solved. Uses easy-to-read notation like superscripts (x², y³) and the square root symbol (√), using parentheses √(...) for clarity when the radicand has multiple terms.'),
     }),
   },
   // Using a Pro model for potentially better mathematical reasoning
@@ -65,7 +65,7 @@ Follow these instructions PRECISELY:
     *   **Use Simple Language:** Explain steps clearly, as if tutoring someone. Avoid overly technical jargon where possible.
     *   **Use Preferred Math Notation:**
         *   **Exponents:** Strongly prefer superscript characters (e.g., \`x²\`, \`y³\`, \`2³\`) for simple, single-digit/variable exponents. If superscripts are not feasible (e.g., for complex exponents like \`(2x+1)\` or fractional exponents), use the caret (\`^\`) with parentheses around the base and/or exponent as needed for clarity, like \`(x+y)²\` or \`e^(2x+1)\` or \`x^(1/2)\`. Avoid using superscripts for multi-character exponents if it looks confusing.
-        *   **Square Roots:** ALWAYS use the actual square root symbol \`√\` (e.g., \`√16\`, \`√(x+1)\`). NEVER use \`sqrt()\`.
+        *   **Square Roots:** ALWAYS use the actual square root symbol \`√\`. For single numbers or variables (like \`√16\`, \`√x\`), the symbol alone is sufficient. For expressions with multiple terms under the root, **MUST** use parentheses to clearly show the scope: \`√(expression)\` (e.g., \`√(x² + 1)\`, \`√(9 - y²)\`). NEVER use \`sqrt()\`.
         *   **Multiplication:** Use the multiplication sign \`×\` (times symbol) or implicit multiplication (e.g., \`2x\`) where appropriate. Avoid using \`*\` unless necessary for clarity between numbers (e.g., \`3 × 4\`).
         *   **Division:** Use the division sign \`÷\` or fraction notation (\`numerator/denominator\`) where appropriate. Parenthesize complex numerators/denominators (e.g., \`(x+1)/(y-2)\`). Avoid using \`/\` alone for simple division if \`÷\` is clearer.
         *   Render math inline using backticks (\`...\`) for simple expressions or use standard text. For more complex steps or equations, consider placing them on their own line for clarity.
@@ -105,7 +105,7 @@ const solveMathExpressionFlow = ai.defineFlow<
       // Return a specific error message if the input is clearly unusable from upstream OCR
       const reason = !trimmedExpression ? "empty" :
                      trimmedExpression === NO_TEXT_FOUND_MESSAGE ? "indicates no text was found" :
-                     "indicates an OCR processing error occurred";
+                     "it indicates an error occurred earlier";
       console.warn(`Solve flow received invalid input: ${reason}. Expression: "${input.expression}"`);
       return { solution: `${MATH_AI_ERROR_PREFIX} Cannot solve. The input expression ${reason}. Please provide a valid mathematical expression, possibly by correcting the OCR output.` };
   }
