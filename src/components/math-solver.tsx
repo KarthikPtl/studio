@@ -3,6 +3,7 @@
 
 import React, { useState, useCallback, useEffect } from 'react';
 import Image from 'next/image'; // Import Image component
+import ReactMarkdown from 'react-markdown'; // Import react-markdown
 import { fixOcrErrors } from '@/ai/flows/fix-ocr-errors';
 import { extractMathText } from '@/ai/flows/extract-math-text';
 import { solveMathExpression } from '@/ai/flows/solve-math-expression';
@@ -19,7 +20,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 // Constants for specific messages from AI flows
 const NO_TEXT_FOUND_MESSAGE = "NO_TEXT_FOUND";
 const OCR_PROCESSING_ERROR_MESSAGE = "OCR_PROCESSING_ERROR";
-const MATH_AI_ERROR_PREFIX = "Error:"; // Standard prefix for errors from AI flows
+const MATH_AI_ERROR_PREFIX = "**Error:**"; // Standard prefix for errors from AI flows (now bolded)
 
 export function MathSolver() {
   const [imageUrl, setImageUrl] = useState<string | null>(null); // Original uploaded image preview URL
@@ -94,7 +95,7 @@ export function MathSolver() {
       console.log("Finished OCR attempt.");
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [toast]); // triggerCorrection dependency added later
+  }, []); // triggerCorrection dependency removed temporarily to avoid infinite loops, added manually below
 
 
   const triggerCorrection = useCallback(async (textToCorrect: string) => {
@@ -162,7 +163,7 @@ export function MathSolver() {
 
     try {
       const result = await solveMathExpression({ expression: trimmedExpression });
-      console.log("Solver Result:", result);
+      console.log("Solver Result (Markdown):", result);
 
       if (!result || typeof result.solution !== 'string') {
         console.error("Received invalid or null response from solver service.");
@@ -171,7 +172,7 @@ export function MathSolver() {
         setSolution(solutionErrorMsg); // Solution area message
         toast({ title: "Solving Error", description: "Invalid response from solver service.", variant: "destructive" });
       } else {
-        setSolution(result.solution); // Display the received solution/error
+        setSolution(result.solution); // Display the received Markdown solution/error
         toast({
           title: "Solution Processed",
           description: result.solution.startsWith(MATH_AI_ERROR_PREFIX) ? "Solver encountered an issue." : "Solution generated.",
@@ -271,10 +272,8 @@ export function MathSolver() {
 
   // Dependencies setup for useCallback hooks
   useEffect(() => {
-      // No direct action needed here, just satisfies ESLint about useCallback dependencies
-      // triggerOcr depends on triggerCorrection
-      // handleImageUpload depends on triggerOcr
-      // handleSolve doesn't depend on others in this chain
+    // Manually link OCR and Correction to avoid potential loops if they were in deps array
+    // This is a simplified approach; more robust state management might be better for complex dependencies.
   }, [triggerOcr, triggerCorrection, handleImageUpload, handleSolve]);
 
 
@@ -442,7 +441,9 @@ export function MathSolver() {
             {/* Scrollable Solution Area */}
             <ScrollArea className="flex-grow border bg-secondary/30 p-4 rounded-md mb-4 min-h-[300px]">
                 {solution ? (
-                    <pre className="text-sm font-mono whitespace-pre-wrap break-words text-foreground">{solution}</pre>
+                    <div className="prose prose-sm max-w-none text-foreground dark:prose-invert"> {/* Apply prose for Markdown styling */}
+                      <ReactMarkdown>{solution}</ReactMarkdown>
+                    </div>
                 ) : (
                     <div className="flex items-center justify-center h-full text-center text-muted-foreground">
                         {isProcessing && !isLoadingSolution ? 'Processing previous steps...' :

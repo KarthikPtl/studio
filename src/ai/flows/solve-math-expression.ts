@@ -21,7 +21,7 @@ export type SolveMathExpressionInput = z.infer<typeof SolveMathExpressionInputSc
 const SolveMathExpressionOutputSchema = z.object({
   solution: z
     .string()
-    .describe('A detailed, step-by-step solution to the mathematical expression, clearly indicating the final answer(s), or a specific explanation if it cannot be solved.'),
+    .describe('A detailed, step-by-step solution to the mathematical expression, formatted in Markdown. Includes clear steps and the final answer(s), or a specific explanation if it cannot be solved.'),
 });
 export type SolveMathExpressionOutput = z.infer<typeof SolveMathExpressionOutputSchema>;
 
@@ -42,12 +42,12 @@ const prompt = ai.definePrompt({
     schema: z.object({
       solution: z
         .string()
-        .describe('A detailed, step-by-step solution to the mathematical expression, clearly indicating the final answer(s), or a specific explanation if it cannot be solved. Use standard mathematical notation.'),
+        .describe('A detailed, step-by-step solution to the mathematical expression, formatted in Markdown. Includes clear steps and the final answer(s), or a specific explanation if it cannot be solved. Use standard mathematical notation within the Markdown.'),
     }),
   },
   // Using a Pro model for potentially better mathematical reasoning
   model: 'googleai/gemini-1.5-pro',
-  prompt: `You are a highly proficient and meticulous math solver AI. Your task is to provide a detailed, step-by-step solution for the given mathematical expression or equation.
+  prompt: `You are a highly proficient and meticulous math solver AI. Your task is to provide a detailed, step-by-step solution for the given mathematical expression or equation, formatted clearly using Markdown.
 
 Analyze the input expression: \`{{{expression}}}\`
 
@@ -60,23 +60,23 @@ Follow these instructions PRECISELY:
     *   If it's a simple system of linear equations (e.g., "x + y = 5, x - y = 1"), solve for all variables using methods like substitution or elimination, showing steps.
     *   If it involves standard functions (e.g., "sin(pi/2)", "log10(100)", "sqrt(16)"), evaluate them clearly.
     *   If it requires basic calculus (e.g., derivative of x^2, integral of 2x), perform the operation and show steps if possible.
-3.  **Show Steps Clearly:**
-    *   Use numbered steps for clarity.
-    *   Use standard mathematical notation ONLY (e.g., use '*', '/', '+', '-', '^' for exponentiation, 'sqrt()' for square root). Use fractions where appropriate (e.g., 1/2 instead of 0.5 unless context demands decimal). Use standard function names (sin, cos, log, ln). Avoid verbose language like "multiplied by".
-    *   Explain the *method* being used briefly if complex (e.g., "1. Apply quadratic formula:", "2. Isolate x by subtracting 3 from both sides:").
-4.  **State Final Answer(s):** Clearly label the final result(s) using "**Final Answer:**" or "**Solution:**". For equations, state all valid solutions (e.g., "x = 4", or "x = 2, x = 3"). Simplify answers fully (e.g., "x = sqrt(2)", not "x = sqrt(8)/2").
-5.  **Handle Unsolvable/Invalid Cases:**
-    *   If the expression is mathematically invalid (e.g., "2 + = 5", division by zero within the expression like "1/(2-2)"), state clearly: "**Error:** The expression is mathematically invalid because [specific reason, e.g., contains division by zero]."
-    *   If the input string itself does not appear to be a parsable mathematical expression (e.g., contains random non-math text), state: "**Error:** The input does not appear to be a valid mathematical expression."
-    *   If the equation has no real solution (e.g., "x^2 = -1"), demonstrate the reasoning and state: "**Conclusion:** The equation has no real solution." (Provide complex solutions if applicable and seems intended, e.g., x = ±i).
-    *   If the equation has infinitely many solutions (e.g., "x + 1 = x + 1" or "0 = 0"), demonstrate the identity and state: "**Conclusion:** The equation is true for all valid values of the variable(s) (infinite solutions)."
-    *   If it requires highly advanced math beyond standard calculus or involves ambiguous notation you cannot confidently interpret, state: "**Error:** Solving this expression requires advanced mathematical techniques or clarification due to ambiguity."
-    *   DO NOT output generic placeholders like "Cannot determine equation type". Provide a specific reason from the categories above. Be definitive.
+3.  **Format Output as Markdown:**
+    *   Use Markdown headings (e.g., \`## Steps\`) or numbered lists (\`1. ...\`, \`2. ...\`) for clarity in showing steps.
+    *   Use standard mathematical notation within the Markdown (e.g., use \`*\`, \`/\`, \`+\`, \`-\`, \`^\` for exponentiation, \`sqrt()\`). Use fractions where appropriate (e.g., \`1/2\`). Use standard function names (\`sin\`, \`cos\`, \`log\`, \`ln\`). Render math inline using backticks (\`...\`) for simple expressions or use standard text.
+    *   Explain the *method* being used briefly if complex (e.g., \`1. Apply quadratic formula: ...\`, \`2. Isolate x by subtracting 3 from both sides: ...\`).
+4.  **State Final Answer(s):** Clearly label the final result(s) using Markdown emphasis like \`**Final Answer:** ...\` or \`**Solution:** ...\`. For equations, state all valid solutions (e.g., \`x = 4\`, or \`x = 2, x = 3\`). Simplify answers fully (e.g., \`x = sqrt(2)\`, not \`x = sqrt(8)/2\`).
+5.  **Handle Unsolvable/Invalid Cases (Format as Error/Conclusion):**
+    *   If the expression is mathematically invalid (e.g., "2 + = 5", division by zero like "1/(2-2)"), state clearly: \`**Error:** The expression is mathematically invalid because [specific reason].\`
+    *   If the input string itself does not appear to be a parsable mathematical expression, state: \`**Error:** The input does not appear to be a valid mathematical expression.\`
+    *   If the equation has no real solution (e.g., "x^2 = -1"), demonstrate the reasoning and state: \`**Conclusion:** The equation has no real solution.\` (Provide complex solutions like \`x = ±i\` if applicable).
+    *   If the equation has infinitely many solutions (e.g., "x + 1 = x + 1"), demonstrate the identity and state: \`**Conclusion:** The equation is true for all valid values (infinite solutions).\`
+    *   If it requires highly advanced math or is too ambiguous, state: \`**Error:** Solving this expression requires advanced techniques or clarification.\`
+    *   Provide a specific reason; do not use generic placeholders. Be definitive.
 
 Input Expression:
 \`{{{expression}}}\`
 
-Step-by-step Solution:`,
+Markdown Solution:`,
 });
 
 
@@ -100,7 +100,7 @@ const solveMathExpressionFlow = ai.defineFlow<
                      trimmedExpression === NO_TEXT_FOUND_MESSAGE ? "indicates no text was found" :
                      "indicates an OCR processing error occurred";
       console.warn(`Solve flow received invalid input: ${reason}. Expression: "${input.expression}"`);
-      return { solution: `Error: Cannot solve. The input expression ${reason}. Please provide a valid mathematical expression, possibly by correcting the OCR output.` };
+      return { solution: `**Error:** Cannot solve. The input expression ${reason}. Please provide a valid mathematical expression, possibly by correcting the OCR output.` };
   }
 
   try {
@@ -111,16 +111,20 @@ const solveMathExpressionFlow = ai.defineFlow<
       if (!output || output.solution === null || output.solution === undefined) {
           // This indicates an unexpected failure in the AI generation itself
           console.error("AI failed to generate a solution for:", trimmedExpression);
-          return { solution: "Error: The AI solver failed to generate a response. Please try again." };
+          return { solution: "**Error:** The AI solver failed to generate a response. Please try again." };
       }
 
-      console.log("Solver returned:", output.solution);
+      console.log("Solver returned (Markdown):", output.solution);
+      // Basic check to ensure it looks somewhat like Markdown (weak check)
+      if (!output.solution.includes('**') && !output.solution.includes('\n') && !/^\d+\./m.test(output.solution)) {
+        console.warn("Solver output doesn't strongly resemble Markdown. Passing through anyway.");
+      }
       return output;
 
   } catch (error) {
       console.error("Error occurred during solveMathExpressionFlow for:", trimmedExpression, error);
       // Handle potential errors thrown by the Genkit flow/prompt execution
       const errorMsg = error instanceof Error ? error.message : "An unknown error occurred during solving.";
-      return { solution: `Error: An unexpected error occurred while trying to solve the expression: ${errorMsg}` };
+      return { solution: `**Error:** An unexpected error occurred while trying to solve the expression: ${errorMsg}` };
   }
 });

@@ -87,8 +87,71 @@ export default {
   		animation: {
   			'accordion-down': 'accordion-down 0.2s ease-out',
   			'accordion-up': 'accordion-up 0.2s ease-out'
-  		}
+  		},
+      // Add typography plugin customization if needed
+      typography: ({ theme }: { theme: (path: string) => string }) => ({
+        DEFAULT: {
+          css: {
+            '--tw-prose-body': theme('colors.foreground'),
+            '--tw-prose-headings': theme('colors.foreground'),
+            '--tw-prose-lead': theme('colors.foreground'),
+            '--tw-prose-links': theme('colors.primary.DEFAULT'),
+            '--tw-prose-bold': theme('colors.foreground'),
+            '--tw-prose-counters': theme('colors.muted.foreground'),
+            '--tw-prose-bullets': theme('colors.muted.foreground'),
+            '--tw-prose-hr': theme('colors.border'),
+            '--tw-prose-quotes': theme('colors.foreground'),
+            '--tw-prose-quote-borders': theme('colors.border'),
+            '--tw-prose-captions': theme('colors.muted.foreground'),
+            '--tw-prose-code': theme('colors.foreground'), // Use foreground for inline code
+            '--tw-prose-pre-code': theme('colors.card.foreground'), // Specific color for code blocks
+            '--tw-prose-pre-bg': theme('colors.card.DEFAULT'), // Background for code blocks
+            '--tw-prose-th-borders': theme('colors.border'),
+            '--tw-prose-td-borders': theme('colors.border'),
+            '--tw-prose-invert-body': theme('colors.foreground'), // Invert for dark mode if needed
+            '--tw-prose-invert-headings': theme('colors.foreground'),
+            '--tw-prose-invert-lead': theme('colors.foreground'),
+            '--tw-prose-invert-links': theme('colors.primary.DEFAULT'),
+            '--tw-prose-invert-bold': theme('colors.foreground'),
+            '--tw-prose-invert-counters': theme('colors.muted.foreground'),
+            '--tw-prose-invert-bullets': theme('colors.muted.foreground'),
+            '--tw-prose-invert-hr': theme('colors.border'),
+            '--tw-prose-invert-quotes': theme('colors.foreground'),
+            '--tw-prose-invert-quote-borders': theme('colors.border'),
+            '--tw-prose-invert-captions': theme('colors.muted.foreground'),
+            '--tw-prose-invert-code': theme('colors.foreground'),
+            '--tw-prose-invert-pre-code': theme('colors.card.foreground'),
+            '--tw-prose-invert-pre-bg': theme('colors.card.DEFAULT'),
+            '--tw-prose-invert-th-borders': theme('colors.border'),
+            '--tw-prose-invert-td-borders': theme('colors.border'),
+            // Customize specific elements
+            code: {
+              backgroundColor: 'hsl(var(--muted) / 0.2)', // Subtle background for inline code
+              padding: '0.2em 0.4em',
+              margin: '0',
+              fontSize: '85%',
+              borderRadius: '0.25rem',
+              fontWeight: '400', // Ensure it's not too bold
+            },
+            'code::before': {
+              content: '""', // Remove backticks added by prose
+            },
+            'code::after': {
+              content: '""', // Remove backticks added by prose
+            },
+             // Style blockquotes
+             blockquote: {
+              borderLeftColor: 'hsl(var(--primary))',
+              fontStyle: 'normal',
+              color: 'hsl(var(--muted-foreground))',
+            },
+          },
+        },
+      }),
   	}
   },
-  plugins: [require("tailwindcss-animate")],
+  plugins: [
+    require("tailwindcss-animate"),
+    require("@tailwindcss/typography") // Add typography plugin
+  ],
 } satisfies Config;

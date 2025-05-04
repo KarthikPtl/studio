@@ -80,6 +80,23 @@ body {
     --sidebar-accent-foreground: 240 4.8% 95.9%;
     --sidebar-border: 240 3.7% 15.9%;
     --sidebar-ring: 207 90% 58%; /* Lighter blue */
+
+    /* Ensure prose dark mode styles are applied if using typography plugin */
+    --tw-prose-invert-body: hsl(var(--foreground));
+    --tw-prose-invert-headings: hsl(var(--foreground));
+    --tw-prose-invert-links: hsl(var(--primary));
+    --tw-prose-invert-bold: hsl(var(--foreground));
+    --tw-prose-invert-counters: hsl(var(--muted-foreground));
+    --tw-prose-invert-bullets: hsl(var(--muted-foreground));
+    --tw-prose-invert-hr: hsl(var(--border));
+    --tw-prose-invert-quotes: hsl(var(--foreground));
+    --tw-prose-invert-quote-borders: hsl(var(--border));
+    --tw-prose-invert-captions': hsl(var(--muted-foreground));
+    --tw-prose-invert-code: hsl(var(--foreground));
+    --tw-prose-invert-pre-code': hsl(var(--card-foreground));
+    --tw-prose-invert-pre-bg': hsl(var(--card));
+    --tw-prose-invert-th-borders': hsl(var(--border));
+    --tw-prose-invert-td-borders': hsl(var(--border));
   }
 }
 
@@ -90,4 +107,9 @@ body {
   body {
     @apply bg-background text-foreground;
   }
+  /* Optional: Add specific base styles for Markdown elements if needed */
+  /* Example: Ensure lists have appropriate margin */
+  /* .prose ul, .prose ol {
+    @apply my-4 ml-6 list-disc list-inside;
+  } */
 }
