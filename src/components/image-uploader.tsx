@@ -53,7 +53,7 @@ export function ImageUploader({ onImageUpload, imageUrl, setImageUrl, setFile }:
     <Card className={cn("border-2 border-dashed hover:border-primary transition-colors", isDragging || isDragActive ? "border-primary bg-accent/10" : "")}>
       <CardContent
         {...getRootProps()}
-        className={cn("relative flex flex-col items-center justify-center p-6 min-h-[200px] cursor-pointer text-center", className)}
+        className={cn("relative flex flex-col items-center justify-center p-6 min-h-[200px] cursor-pointer text-center")}
       >
         <input {...getInputProps()} />
         {imageUrl ? (
