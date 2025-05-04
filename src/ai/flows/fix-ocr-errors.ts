@@ -2,9 +2,9 @@
 'use server';
 
 /**
- * @fileOverview This file contains a Genkit flow that automatically corrects common OCR misread characters in a math expression, including those from handwritten sources, aiming for standard mathematical notation.
+ * @fileOverview This file contains a Genkit flow that attempts to correct common OCR misreads in mathematical expressions and applies basic corrections to full text.
  *
- * - fixOcrErrors - A function that takes an OCR-extracted math expression and returns a corrected version.
+ * - fixOcrErrors - A function that takes OCR-extracted full text and an optional math expression and returns corrected versions.
  * - FixOcrErrorsInput - The input type for the fixOcrErrors function.
  * - FixOcrErrorsOutput - The return type for the fixOcrErrors function.
  */
@@ -21,7 +21,7 @@ const API_ERROR_QUOTA_MARKER = "API_ERROR_QUOTA";
 const GENERAL_API_ERROR_MARKER = "API_GENERAL_ERROR";
 const OCR_BLOCKED_BY_SAFETY_MARKER = "OCR_BLOCKED_BY_SAFETY";
 
-// List of messages that should bypass the correction flow
+// List of messages that should bypass the correction flow for the 'fullText' field
 const BYPASS_CORRECTION_MESSAGES = [
     NO_TEXT_FOUND_MESSAGE,
     OCR_PROCESSING_ERROR_MESSAGE,
@@ -36,23 +36,37 @@ const BYPASS_CORRECTION_MESSAGES = [
 const FixOcrErrorsInputSchema = z.object({
   ocrText: z
     .string()
-    .describe('The potentially imperfect OCR-extracted text from the math expression image (could be printed or handwritten). Should not be one of the known error/bypass messages.'),
+    .describe('The full OCR-extracted text from the image, potentially including a word problem or general text.'),
+  ocrExpression: z
+    .string()
+    .nullable() // Expression might not have been extracted
+    .describe('The isolated mathematical expression extracted by OCR, if any. Null if none was found or if ocrText is an error message.'),
 });
 export type FixOcrErrorsInput = z.infer<typeof FixOcrErrorsInputSchema>;
 
 const FixOcrErrorsOutputSchema = z.object({
   correctedText: z
     .string()
-    .describe('The corrected math expression text, prioritizing mathematical validity and standard notation (superscripts, √, ×, ÷). Returns the original text if no corrections are confidently identified or if input was an error/bypass message.'),
+    .describe('The corrected full text. Returns the original ocrText if it was an error/bypass message or if no corrections are confidently identified.'),
+  correctedExpression: z
+    .string()
+    .nullable() // Still nullable
+    .describe('The corrected math expression, prioritizing mathematical validity and standard notation (superscripts, √). Returns the original ocrExpression (or null) if no corrections are confidently identified or if input was null/error.'),
 });
 export type FixOcrErrorsOutput = z.infer<typeof FixOcrErrorsOutputSchema>;
 
 export async function fixOcrErrors(input: FixOcrErrorsInput): Promise<FixOcrErrorsOutput> {
-   // Handle cases where OCR might have produced known failure/bypass states upstream
+   // If the main OCR text is an error message, bypass correction entirely
   if (!input.ocrText || BYPASS_CORRECTION_MESSAGES.includes(input.ocrText)) {
     console.warn(`Skipping correction for upstream status: "${input.ocrText}"`);
-    // Return the original upstream message directly.
-    return { correctedText: input.ocrText };
+    return { correctedText: input.ocrText, correctedExpression: null }; // Return original message, null expression
+  }
+
+  // If there's no separate expression to correct, we might still correct the main text
+  if (!input.ocrExpression) {
+      console.log("No separate expression provided, attempting correction on full text only.");
+      // Optionally, could just return the original text here if correction is only desired for expressions
+      // return { correctedText: input.ocrText, correctedExpression: null };
   }
 
   return fixOcrErrorsFlow(input);
@@ -64,19 +78,27 @@ const prompt = ai.definePrompt({
     schema: z.object({
       ocrText: z
         .string()
-        .describe('The potentially imperfect OCR-extracted text from the math expression image (could be printed or handwritten).'),
+        .describe('The full OCR-extracted text, potentially imperfect.'),
+      ocrExpression: z
+        .string()
+        .nullable()
+        .describe('The isolated OCR-extracted math expression, potentially imperfect, or null.'),
     }),
   },
   output: {
     schema: z.object({
       correctedText: z
         .string()
-        .describe('The corrected math expression text, prioritizing mathematical validity and standard notation (superscripts, √, ×, ÷). Returns the original text if no corrections are confidently identified.'),
+        .describe('The corrected full text, with basic OCR errors fixed (like l->1, O->0).'),
+      correctedExpression: z
+        .string()
+        .nullable()
+        .describe('The corrected math expression with higher focus on math validity and notation (superscripts, √), or null if input was null or uncorrectable.'),
     }),
   },
-  model: 'googleai/gemini-1.5-flash', // Flash should be sufficient for correction
-  prompt: `You are an expert in correcting Optical Character Recognition (OCR) errors in mathematical expressions, including those extracted from HANDWRITTEN sources.
-Your task is to analyze the given OCR text and correct common misinterpretations to produce the most likely *intended*, mathematically plausible expression using **standard mathematical notation**.
+  model: 'googleai/gemini-1.5-flash', // Flash is likely sufficient
+  prompt: `You are an expert in correcting Optical Character Recognition (OCR) errors, especially in text containing mathematical content (including handwritten).
+Your task is to analyze the given OCR full text and the separately extracted mathematical expression (if provided). Correct common misinterpretations to produce the most likely intended text and expression. Apply *more rigorous* mathematical correction to the 'ocrExpression' if present.
 
 Common OCR & Handwriting Errors to Look For:
 - 'O' vs '0' (zero)
@@ -85,34 +107,37 @@ Common OCR & Handwriting Errors to Look For:
 - 'B' vs '8'
 - 'Z' vs '2'
 - 'g' vs '9' vs 'q'
-- 't' vs '+'
-- 'x' (variable) vs '*' (multiplication) vs '×' (times symbol) - Infer based on context. Aim for implicit multiplication (e.g., '2x') or the '×' symbol. Avoid '*'.
-- '/' (slash) vs '÷' (division symbol) - Aim for '÷' or fraction notation. Avoid '/'.
-- '^' (caret) vs Superscript characters (e.g., ², ³) - Aim for superscripts for simple exponents. Use \\\`(base)^(exponent)\\\` only if the exponent is complex.
-- 'sqrt' vs '√' (square root symbol) - ALWAYS aim for '√'.
-- Misplaced or missing operators (+, -, =, etc.) - Add or correct operators *only* if the mathematical structure strongly implies it.
-- Incorrectly recognized exponents (e.g., 'x ^ 2' -> 'x²') or subscripts.
-- Confusion between similar symbols like '-' and '–' (en dash). Standardize to '-'.
-- Broken fractions (e.g., '1 / 2' -> '1/2').
+- 't' vs '+' (especially in math context)
+- 'x' (variable) vs '*' (multiplication) vs '×' (times symbol) - Infer based on context. Aim for '×' or implicit multiplication in the expression. Avoid '*'.
+- '/' (slash) vs '÷' (division symbol) - Aim for '÷' or fraction notation in the expression. Avoid '/'.
+- '^' (caret) vs Superscript characters (e.g., ², ³) - Aim for superscripts (like x², 2³) in the expression for simple exponents. Use \`(base)^(exponent)\` only if complex.
+- 'sqrt' vs '√' (square root symbol) - ALWAYS aim for '√' in the expression. Use √(...) for clarity if needed.
+- Misplaced/missing math operators.
+- Broken fractions.
 
 Instructions:
-1.  Analyze the input OCR Text: \`{{{ocrText}}}\`
-2.  Identify potential OCR or handwriting misreads based on the common errors and mathematical context.
-3.  Correct ONLY the errors that you are reasonably confident about, aiming for a more mathematically valid or standard representation using the preferred notation:
-    *   Use superscripts (², ³) for simple powers like x², y³, 2³.
-    *   Use '√' for square roots (e.g., √16, √(x+1)).
-    *   Use '×' for multiplication (e.g., 3 × 4) or implicit multiplication (e.g., 2x, ab). Avoid '*'.
-    *   Use '÷' for division (e.g., 10 ÷ 2) or fraction notation (e.g., 1/2, (x+1)/(y-2)). Avoid '/'.
-4.  If a character looks like a standard variable (like 'x', 'y', 'a', 'b'), KEEP it as a variable unless the context overwhelmingly suggests it's a number or operator (e.g., '2x' should remain '2x').
-5.  Prioritize making the expression mathematically plausible. If a correction makes the expression nonsensical, revert it.
-6.  If the input text is already mathematically valid and uses the preferred standard notation, or if you are uncertain about potential corrections, return the ORIGINAL text unchanged. Do not force corrections.
-7.  Output ONLY the corrected (or original) mathematical expression. Do not add explanations, introductions, or markdown formatting like \`\`\`.
+1.  Analyze the input OCR Full Text: \`{{{ocrText}}}\`
+2.  Analyze the input OCR Expression (if not null): \`{{{ocrExpression}}}\`
+3.  **Correct the Full Text ('ocrText'):** Apply *basic, high-confidence* corrections for common misreads (O/0, l/1, S/5, B/8, Z/2). Preserve the overall structure and wording. Put this result in 'correctedText'.
+4.  **Correct the Expression ('ocrExpression'):**
+    *   If 'ocrExpression' is provided (not null), apply *more thorough corrections*, focusing on mathematical validity and standard notation (superscripts, √, ×, ÷). Use the common errors list. Aim for the most plausible intended mathematical expression. Put this result in 'correctedExpression'.
+    *   If 'ocrExpression' is null or empty, the output 'correctedExpression' should also be null.
+    *   If 'ocrExpression' is provided but uncorrectable or doesn't look like math, return the original 'ocrExpression' in 'correctedExpression'.
+5.  **Maintain Consistency:** If the expression is part of the full text, ensure corrections are reflected reasonably in both outputs, but prioritize mathematical correctness in 'correctedExpression'.
+6.  **Uncertainty:** If you are uncertain about a correction, especially in the full text, *do not change it*. Prioritize accuracy over forcing changes.
+7.  **Output Format:** Return ONLY a JSON object with 'correctedText' and 'correctedExpression' keys. No extra explanations or markdown.
 
-OCR Text:
-\`{{{ocrText}}}\`
+Input JSON:
+\`\`\`json
+{
+  "ocrText": "{{{ocrText}}}",
+  "ocrExpression": {{{json ocrExpression}}}
+}
+\`\`\`
 
-Corrected Text:`,
+Output JSON:`,
 });
+
 
 const fixOcrErrorsFlow = ai.defineFlow<
   typeof FixOcrErrorsInputSchema,
@@ -124,28 +149,36 @@ const fixOcrErrorsFlow = ai.defineFlow<
 }, async input => {
 
   try {
-    console.log(`Calling correction model with text: "${input.ocrText}"`);
+    console.log(`Calling correction model with text: "${input.ocrText}" and expression: "${input.ocrExpression}"`);
     const {output} = await prompt(input);
 
     // Basic fallback if AI fails unexpectedly
-    if (!output || output.correctedText === null || output.correctedText === undefined) {
-        console.warn("Correction flow returned null/undefined output. Returning original text.");
-        return { correctedText: input.ocrText };
+    if (!output || output.correctedText === null || output.correctedText === undefined) { // correctedExpression can be null
+        console.warn("Correction flow returned null/undefined output for correctedText. Returning original inputs.");
+        return { correctedText: input.ocrText, correctedExpression: input.ocrExpression };
     }
 
     // Trim potential whitespace from the model's response
     const trimmedCorrectedText = output.correctedText.trim();
+    // Handle null expression possibility - trim if string, else keep null
+    const trimmedCorrectedExpression = typeof output.correctedExpression === 'string'
+        ? output.correctedExpression.trim() || null // Treat empty string correction as null
+        : null;
 
-    console.log(`Correction model returned: "${trimmedCorrectedText}"`);
-    // Return the trimmed corrected text
-    return { correctedText: trimmedCorrectedText };
+
+    console.log(`Correction model returned text: "${trimmedCorrectedText}"`);
+    console.log(`Correction model returned expression: "${trimmedCorrectedExpression}"`);
+
+    // Return the trimmed corrected results
+    return {
+        correctedText: trimmedCorrectedText,
+        correctedExpression: trimmedCorrectedExpression
+    };
 
    } catch (error) {
-      console.error("Error occurred during fixOcrErrorsFlow for:", input.ocrText, error);
-      const errorMsg = error instanceof Error ? error.message : "An unknown error occurred during correction.";
-      // Fallback to the original text if the correction flow itself fails
-      // Log the error but don't propagate it in the 'correctedText' field.
-      // The UI should show the original OCR text in the editable field.
-      return { correctedText: input.ocrText };
+      console.error("Error occurred during fixOcrErrorsFlow for:", input, error);
+      // Fallback to the original text/expression if the correction flow itself fails
+      console.error("Falling back to original OCR results due to correction error.");
+      return { correctedText: input.ocrText, correctedExpression: input.ocrExpression };
   }
 });

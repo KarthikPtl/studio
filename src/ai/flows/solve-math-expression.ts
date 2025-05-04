@@ -2,9 +2,9 @@
 'use server';
 
 /**
- * @fileOverview A Genkit flow to solve a mathematical expression, providing step-by-step solutions.
+ * @fileOverview A Genkit flow to solve a mathematical expression or word problem, providing step-by-step solutions.
  *
- * - solveMathExpression - A function that takes a math expression string and returns the solution.
+ * - solveMathExpression - A function that takes a math expression/problem and optional context and returns the solution.
  * - SolveMathExpressionInput - The input type for the solveMathExpression function.
  * - SolveMathExpressionOutput - The return type for the solveMathExpression function.
  */
@@ -15,18 +15,42 @@ import { z } from 'genkit';
 const SolveMathExpressionInputSchema = z.object({
   expression: z
     .string()
-    .describe('The corrected mathematical expression to be solved (e.g., "2x + 3 = 11", "x² - 4 = 0", "sin(π/2)"). Should not be "NO_TEXT_FOUND" or "OCR_PROCESSING_ERROR".'),
+    .nullable() // Expression might be null if only full text is relevant (e.g., pure word problem)
+    .describe('The core mathematical expression to be solved, if extracted. Null if the main input is the full text context.'),
+  fullTextContext: z
+    .string()
+    .describe('The full text context of the problem, which might be a word problem or contain the expression itself. This is the primary input if \'expression\' is null.'),
 });
 export type SolveMathExpressionInput = z.infer<typeof SolveMathExpressionInputSchema>;
 
 const SolveMathExpressionOutputSchema = z.object({
   solution: z
     .string()
-    .describe('A detailed, step-by-step solution to the mathematical expression, formatted in Markdown. Includes clear steps and the final answer(s), or a specific explanation if it cannot be solved. Uses easy-to-read notation like superscripts (x², y³) and the square root symbol (√), using parentheses √(...) for clarity when the radicand has multiple terms.'),
+    .describe('A detailed, step-by-step solution formatted in Markdown. Solves the expression or the word problem described in the context. Includes clear steps, the final answer(s), or a specific explanation if it cannot be solved. Uses easy-to-read notation (superscripts, √).'),
 });
 export type SolveMathExpressionOutput = z.infer<typeof SolveMathExpressionOutputSchema>;
 
+// Constants for error/status messages (ensure consistency with other flows)
+const NO_TEXT_FOUND_MESSAGE = "NO_TEXT_FOUND";
+const OCR_PROCESSING_ERROR_MESSAGE = "OCR_PROCESSING_ERROR";
+const MATH_AI_ERROR_PREFIX = "**Error:**"; // Standard prefix for user-facing errors in the solution field
+
 export async function solveMathExpression(input: SolveMathExpressionInput): Promise<SolveMathExpressionOutput> {
+   // Input validation: Need at least fullTextContext
+   if (!input.fullTextContext || [NO_TEXT_FOUND_MESSAGE, OCR_PROCESSING_ERROR_MESSAGE].includes(input.fullTextContext)) {
+       const reason = !input.fullTextContext ? "is missing" : "indicates an upstream error";
+       const errorMsg = `${MATH_AI_ERROR_PREFIX} Cannot solve because the required text context ${reason}. Please provide valid text, possibly by correcting the OCR output.`;
+       console.warn(`Solve flow received invalid input context: "${input.fullTextContext}"`);
+       return { solution: errorMsg };
+   }
+   // Expression is optional, but if provided, it shouldn't be an error message either
+   if (input.expression && [NO_TEXT_FOUND_MESSAGE, OCR_PROCESSING_ERROR_MESSAGE].includes(input.expression)) {
+        console.warn(`Solve flow received invalid expression input: "${input.expression}". Will rely on fullTextContext.`);
+        // We can proceed using only fullTextContext, but nullify the bad expression
+        input.expression = null;
+   }
+
+
   return solveMathExpressionFlow(input);
 }
 
@@ -34,53 +58,57 @@ const prompt = ai.definePrompt({
   name: 'solveMathExpressionPrompt',
   input: {
     schema: z.object({
-      expression: z
-        .string()
-        .describe('The corrected mathematical expression to be solved (e.g., "2x + 3 = 11", "x² - 4 = 0", "sin(π/2)").'),
+        expression: z.string().nullable().describe('The specific mathematical expression, if isolated.'),
+        fullTextContext: z.string().describe('The full context, potentially a word problem containing the expression or question.'),
     }),
   },
   output: {
     schema: z.object({
       solution: z
         .string()
-        .describe('A detailed, step-by-step solution to the mathematical expression, formatted in Markdown. Includes clear steps and the final answer(s), or a specific explanation if it cannot be solved. Uses easy-to-read notation like superscripts (x², y³) and the square root symbol (√), using parentheses √(...) for clarity when the radicand has multiple terms.'),
+        .describe('A detailed, step-by-step solution formatted in Markdown. Solves the expression or word problem. Uses easy-to-read notation (superscripts, √).'),
     }),
   },
-  // Using a Pro model for potentially better mathematical reasoning
-  model: 'googleai/gemini-1.5-pro',
-  prompt: `You are a highly proficient and meticulous math tutor AI. Your task is to provide a detailed, step-by-step solution for the given mathematical expression or equation, formatted clearly using Markdown and prioritizing **readability and standard, user-friendly notation**.
+  model: 'googleai/gemini-1.5-pro', // Use Pro for better reasoning on word problems
+  prompt: `You are a highly proficient and meticulous math tutor AI. Your task is to provide a detailed, step-by-step solution for the given mathematical problem, which might be a direct expression or a word problem. Format the solution clearly using Markdown and prioritize readability and standard, user-friendly notation.
 
-Analyze the input expression: \`{{{expression}}}\`
+Analyze the provided information:
+- **Full Problem Context:** \`{{{fullTextContext}}}\`
+- **Isolated Expression (if available):** \`{{{expression}}}\`
+
+**Determine the Goal:**
+- If an 'expression' is provided, focus on solving that expression, using the 'fullTextContext' for context if needed (e.g., variable definitions).
+- If 'expression' is null or the 'fullTextContext' clearly represents a word problem, identify the question being asked in the word problem and solve it step-by-step.
 
 Follow these instructions PRECISELY:
 
-1.  **Identify Expression Type:** Determine if it's an arithmetic calculation, algebraic equation (linear, quadratic, etc.), system of equations, trigonometric evaluation, or other standard type.
-2.  **Check Solvability & Solve:**
-    *   If it's a calculation (e.g., "3 + 5 × 2"), perform it step-by-step respecting order of operations (PEMDAS/BODMAS).
-    *   If it's a solvable equation (e.g., "2x + 3 = 11", "x² - 5x + 6 = 0"), find the value(s) of the variable(s). Show the main algebraic steps (isolating variable, factoring, using quadratic formula, simplifying radicals, etc.).
-    *   If it's a simple system of linear equations, solve for all variables using methods like substitution or elimination, showing steps.
-    *   If it involves standard functions (e.g., "sin(π/2)", "log10(100)", "√16"), evaluate them clearly.
-3.  **Format Output as Markdown for Maximum Readability:**
-    *   Use Markdown headings (e.g., \`## Steps\`) or numbered lists (\`1. ...\`, \`2. ...\`) for clarity.
-    *   **Use Simple Language:** Explain steps clearly, as if tutoring someone. Avoid overly technical jargon where possible.
-    *   **Use Preferred Math Notation:**
-        *   **Exponents:** Strongly prefer superscript characters (e.g., \`x²\`, \`y³\`, \`2³\`) for simple, single-digit/variable exponents. If superscripts are not feasible (e.g., for complex exponents like \`(2x+1)\` or fractional exponents), use the caret (\`^\`) with parentheses around the base and/or exponent as needed for clarity, like \`(x+y)²\` or \`e^(2x+1)\` or \`x^(1/2)\`. Avoid using superscripts for multi-character exponents if it looks confusing.
-        *   **Square Roots:** ALWAYS use the actual square root symbol \`√\`. For single numbers or variables (like \`√16\`, \`√x\`), the symbol alone is sufficient. For expressions with multiple terms under the root, **MUST** use parentheses to clearly show the scope: \`√(expression)\` (e.g., \`√(x² + 1)\`, \`√(9 - y²)\`). NEVER use \`sqrt()\`.
-        *   **Multiplication:** Use the multiplication sign \`×\` (times symbol) or implicit multiplication (e.g., \`2x\`) where appropriate. Avoid using \`*\` unless necessary for clarity between numbers (e.g., \`3 × 4\`).
-        *   **Division:** Use the division sign \`÷\` or fraction notation (\`numerator/denominator\`) where appropriate. Parenthesize complex numerators/denominators (e.g., \`(x+1)/(y-2)\`). Avoid using \`/\` alone for simple division if \`÷\` is clearer.
-        *   Render math inline using backticks (\`...\`) for simple expressions or use standard text. For more complex steps or equations, consider placing them on their own line for clarity.
-    *   Explain the *method* being used briefly and simply (e.g., \`1. Use the quadratic formula...\`, \`2. Subtract 3 from both sides...\`).
-4.  **State Final Answer(s):** Clearly label the final result(s) using Markdown emphasis like \`**Final Answer:** ...\` or \`**Solution:** ...\`. For equations, state all valid solutions (e.g., \`x = 4\`, or \`x = 2, x = 3\`). Simplify answers fully (e.g., \`x = √2\`, not \`x = √8/2\`).
-5.  **Handle Unsolvable/Invalid Cases (Format as Error/Conclusion):**
-    *   If the expression is mathematically invalid (e.g., "2 + = 5", division by zero like "1/(2-2)"), state clearly: \`**Error:** The expression is mathematically invalid because [specific reason].\`
-    *   If the input string itself does not appear to be a parsable mathematical expression, state: \`**Error:** The input does not look like a valid mathematical expression.\`
-    *   If the equation has no real solution (e.g., "x² = -1"), explain why and state: \`**Conclusion:** The equation has no real solution.\` (Provide complex solutions like \`x = ±i\` if applicable and makes sense).
-    *   If the equation has infinitely many solutions (e.g., "x + 1 = x + 1"), explain why and state: \`**Conclusion:** This equation is true for all valid values (infinite solutions).\`
-    *   If it requires highly advanced math or is too ambiguous, state: \`**Error:** Solving this expression needs advanced math or more information.\`
-    *   Provide a specific reason; do not use generic placeholders. Be definitive.
-
-Input Expression:
-\`{{{expression}}}\`
+1.  **Identify Problem Type:** Is it a direct calculation, an algebraic equation, a word problem requiring setup, trigonometry, calculus, etc.?
+2.  **Set Up (for Word Problems):** If it's a word problem, clearly state:
+    *   What information is given.
+    *   What needs to be found.
+    *   Define any variables used.
+    *   Write down the equation(s) needed to solve the problem based on the text.
+3.  **Solve Step-by-Step:**
+    *   Show the main steps involved in solving the equation or problem.
+    *   Explain each step briefly and simply (e.g., "1. Add 3 to both sides:", "2. Calculate the area using A = πr²:").
+    *   Respect the order of operations (PEMDAS/BODMAS).
+4.  **Format Output as Markdown:**
+    *   Use headings (\`##\`), numbered lists (\`1. ...\`), or bullet points (\`* ...\`) for clarity.
+    *   Use simple, tutor-like language.
+    *   **Preferred Math Notation:**
+        *   **Exponents:** Use superscript characters (e.g., \`x²\`, \`y³\`, \`2³\`) for simple exponents. Use caret \`^\` ONLY for complex bases/exponents, with parentheses for clarity: \`(x+y)²\`, \`e^(2x+1)\`, \`x^(1/2)\`.
+        *   **Square Roots:** ALWAYS use \`√\`. For multi-term radicands, MUST use parentheses: \`√(expression)\` (e.g., \`√(x² + 1)\`). For single terms: \`√16\`, \`√x\`.
+        *   **Multiplication:** Use \`×\` or implicit multiplication (\`2x\`). Avoid \`*\`.
+        *   **Division:** Use \`÷\` or fraction notation (\`numerator/denominator\`). Parenthesize complex numerators/denominators. Avoid \`/\`.
+        *   Render math inline with backticks (\`...\`) or on separate lines for complex steps.
+5.  **State Final Answer(s):** Clearly label the final result(s) using Markdown bold: \`**Final Answer:** ...\` or \`**Solution:** ...\`. Include units if applicable (from word problems). Simplify fully.
+6.  **Handle Unsolvable/Invalid Cases (Format as Error/Conclusion):**
+    *   If the input is mathematically invalid or nonsensical: \`**Error:** The problem is invalid because [specific reason].\`
+    *   If the input doesn't seem to be a solvable math problem: \`**Error:** The input does not appear to be a valid mathematical problem.\`
+    *   If there's no real solution: \`**Conclusion:** The equation/problem has no real solution because [reason].\` (Provide complex solutions if appropriate).
+    *   If infinite solutions: \`**Conclusion:** This is true for all valid values (infinite solutions) because [reason].\`
+    *   If requires advanced math beyond typical high school/early college level or is ambiguous: \`**Error:** Solving this requires advanced techniques or more information.\`
+    *   Be specific and definitive.
 
 Markdown Solution:`,
 });
@@ -94,45 +122,29 @@ const solveMathExpressionFlow = ai.defineFlow<
   inputSchema: SolveMathExpressionInputSchema,
   outputSchema: SolveMathExpressionOutputSchema,
 }, async input => {
-  // Constants defined in the component importing this flow
-  const NO_TEXT_FOUND_MESSAGE = "NO_TEXT_FOUND";
-  const OCR_PROCESSING_ERROR_MESSAGE = "OCR_PROCESSING_ERROR";
-  const MATH_AI_ERROR_PREFIX = "**Error:**";
-
-  // Basic input validation - Check against known upstream failure states
-  const trimmedExpression = input.expression?.trim();
-  if (!trimmedExpression || trimmedExpression === NO_TEXT_FOUND_MESSAGE || trimmedExpression === OCR_PROCESSING_ERROR_MESSAGE) {
-      // Return a specific error message if the input is clearly unusable from upstream OCR
-      const reason = !trimmedExpression ? "empty" :
-                     trimmedExpression === NO_TEXT_FOUND_MESSAGE ? "indicates no text was found" :
-                     "it indicates an error occurred earlier";
-      console.warn(`Solve flow received invalid input: ${reason}. Expression: "${input.expression}"`);
-      return { solution: `${MATH_AI_ERROR_PREFIX} Cannot solve. The input expression ${reason}. Please provide a valid mathematical expression, possibly by correcting the OCR output.` };
-  }
 
   try {
-      console.log(`Calling solver model with expression: "${trimmedExpression}"`);
-      const { output } = await prompt({ expression: trimmedExpression });
+      // Log the inputs being used (careful with PII in real scenarios)
+      console.log(`Calling solver model with context: "${input.fullTextContext}" and expression: "${input.expression}"`);
+
+      const { output } = await prompt(input); // Pass both context and expression
 
       // Ensure output is not null or undefined before returning
       if (!output || output.solution === null || output.solution === undefined) {
-          // This indicates an unexpected failure in the AI generation itself
-          console.error("AI failed to generate a solution for:", trimmedExpression);
+          console.error("AI failed to generate a solution for the provided input.");
           return { solution: `${MATH_AI_ERROR_PREFIX} The AI solver failed to generate a response. Please try again.` };
       }
 
       console.log("Solver returned (Markdown):", output.solution);
-      // Basic check to ensure it looks somewhat like Markdown (weak check)
-      if (!output.solution.includes('**') && !output.solution.includes('\n') && !/^\d+\./m.test(output.solution)) {
-        console.warn("Solver output doesn't strongly resemble Markdown. Passing through anyway.");
+      // Optional: Basic check for Markdown structure or error prefix
+      if (!output.solution.includes('**') && !output.solution.includes('\n') && !/^\d+\./m.test(output.solution) && !output.solution.startsWith(MATH_AI_ERROR_PREFIX)) {
+        console.warn("Solver output doesn't strongly resemble expected Markdown or an Error message. Passing through anyway.");
       }
       return output;
 
   } catch (error) {
-      console.error("Error occurred during solveMathExpressionFlow for:", trimmedExpression, error);
-      // Handle potential errors thrown by the Genkit flow/prompt execution
+      console.error("Error occurred during solveMathExpressionFlow:", error);
       const errorMsg = error instanceof Error ? error.message : "An unknown error occurred during solving.";
-      return { solution: `${MATH_AI_ERROR_PREFIX} An unexpected error occurred while trying to solve the expression: ${errorMsg}` };
+      return { solution: `${MATH_AI_ERROR_PREFIX} An unexpected error occurred while trying to solve the problem: ${errorMsg}` };
   }
 });
-
