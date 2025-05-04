@@ -21,7 +21,7 @@ export type SolveMathExpressionInput = z.infer<typeof SolveMathExpressionInputSc
 const SolveMathExpressionOutputSchema = z.object({
   solution: z
     .string()
-    .describe('The solution to the mathematical expression. Provide steps if applicable, clearly indicating the final answer.'),
+    .describe('The step-by-step solution to the mathematical expression, clearly indicating the final answer, or an explanation if unsolvable.'),
 });
 export type SolveMathExpressionOutput = z.infer<typeof SolveMathExpressionOutputSchema>;
 
@@ -42,16 +42,23 @@ const prompt = ai.definePrompt({
     schema: z.object({
       solution: z
         .string()
-        .describe('The solution to the mathematical expression. Provide steps if applicable, clearly indicating the final answer.'),
+        .describe('The step-by-step solution to the mathematical expression, clearly indicating the final answer, or an explanation if unsolvable.'),
     }),
   },
-  // Consider using a more capable model if complex math is expected
-  // model: 'googleai/gemini-1.5-pro',
-  prompt: `Solve the following mathematical expression. Show the key steps if necessary and clearly state the final answer.
+  // Use a more capable model for better mathematical reasoning
+  model: 'googleai/gemini-1.5-pro',
+  prompt: `You are a highly proficient math solver. Your task is to solve the provided mathematical expression step-by-step and provide a clear final answer.
 
-Expression: {{{expression}}}
+Follow these instructions precisely:
+1.  Analyze the input expression: \`{{{expression}}}\`
+2.  If the expression is solvable, show the key steps involved in reaching the solution using standard mathematical notation (e.g., use *, /, +, -).
+3.  Clearly label the final answer (e.g., "Final Answer: ...").
+4.  If the expression is ambiguous, invalid (e.g., contains non-math text), or cannot be solved (e.g., division by zero), state the reason clearly instead of attempting a solution. Do not output placeholder messages. Explain why it's unsolvable.
 
-Solution:`,
+Input Expression:
+\`{{{expression}}}\`
+
+Step-by-step Solution and Final Answer:`,
 });
 
 const solveMathExpressionFlow = ai.defineFlow<
@@ -62,11 +69,21 @@ const solveMathExpressionFlow = ai.defineFlow<
   inputSchema: SolveMathExpressionInputSchema,
   outputSchema: SolveMathExpressionOutputSchema,
 }, async input => {
-  // Basic input validation/sanitization might be needed here depending on requirements
+  // Basic input validation
   if (!input.expression?.trim()) {
       throw new Error("Expression cannot be empty.");
   }
 
+  // Optional: Add more sophisticated validation/sanitization here if needed
+  // e.g., check for potentially harmful input, though the AI prompt also handles invalid math.
+
   const { output } = await prompt(input);
-  return output!;
+
+  // Ensure output is not null or undefined before returning
+  if (!output) {
+      throw new Error("AI failed to generate a solution.");
+  }
+
+  return output;
 });
+
