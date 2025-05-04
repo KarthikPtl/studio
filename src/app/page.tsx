@@ -1,3 +1,9 @@
+import { MathSolver } from '@/components/math-solver';
+
 export default function Home() {
-  return <></>;
+  return (
+    <main>
+      <MathSolver />
+    </main>
+  );
 }
