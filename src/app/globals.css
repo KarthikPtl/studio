@@ -11,7 +11,7 @@ body {
 }
 
 h1, h2, h3, h4, h5, h6 {
-  font-family: var(--font-geist-sans), sans-serif; /* Use Geist Sans for headings */
+  font-family: var(--font-geist-sans), sans-serif; /* Use Geist Sans for headings (Poppins alternative) */
   @apply font-semibold; /* Make headings slightly bolder */
 }
 
@@ -19,39 +19,38 @@ h1, h2, h3, h4, h5, h6 {
 @layer base {
   :root {
     /* Light Theme Colors - NEW PALETTE */
-    --background: 210 40% 98%;     /* Almost White #F9FAFB */
-    --foreground: 215 28% 17%;     /* Slate Gray #1F2937 */
+    --background: 228 33% 98%;     /* #F9FAFB - Almost White */
+    --foreground: 221 39% 28%;     /* #1F2937 - Slate Gray */
 
-    --card: 0 0% 100%;             /* White #FFFFFF */
-    --card-foreground: 215 28% 17%; /* Slate Gray #1F2937 */
+    --card: 0 0% 100%;             /* #FFFFFF - White */
+    --card-foreground: 221 39% 28%; /* #1F2937 - Slate Gray */
 
-    --popover: 0 0% 100%;           /* White #FFFFFF */
-    --popover-foreground: 215 28% 17%; /* Slate Gray #1F2937 */
+    --popover: 0 0% 100%;           /* #FFFFFF - White */
+    --popover-foreground: 221 39% 28%; /* #1F2937 - Slate Gray */
 
-    --primary: 231 60% 57%;         /* Indigo Blue #4C5FD5 */
+    --primary: 231 60% 57%;         /* #4C5FD5 - Indigo Blue */
     --primary-foreground: 0 0% 100%; /* White */
 
-    --secondary: 34 92% 71%;        /* Soft Orange #F4A261 */
-    --secondary-foreground: 215 28% 17%; /* Slate Gray #1F2937 */
+    --secondary: 34 92% 71%;        /* #F4A261 - Soft Orange */
+    --secondary-foreground: 221 39% 28%; /* #1F2937 - Slate Gray (Contrast for Orange) */
 
-    --muted: 215 25% 95%;           /* Lighter Gray #F3F4F6 */
-    --muted-foreground: 216 10% 47%; /* Cool Gray #6B7280 */
+    --muted: 220 14% 96%;           /* #F3F4F6 - Lighter Gray */
+    --muted-foreground: 217 19% 47%; /* #6B7280 - Cool Gray */
 
-    /* Using Teal as Accent */
-    --accent: 173 58% 39%;          /* Teal Green #2A9D8F */
+    --accent: 173 58% 39%;          /* #2A9D8F - Teal Green */
     --accent-foreground: 0 0% 100%;  /* White */
 
-    /* Keeping destructive defaults, adjust if needed */
-    --destructive: 0 75% 55%;      /* Default Red */
+    /* Destructive remains red, adjust if needed */
+    --destructive: 0 72% 51%;       /* Default Red */
     --destructive-foreground: 0 0% 98%; /* White */
 
-    --border: 215 14% 91%;          /* Light Gray #E5E7EB */
-    --input: 0 0% 100%;             /* White #FFFFFF (same as card) */
-    --ring: 231 60% 57%;            /* Indigo Blue #4C5FD5 (Primary) */
+    --border: 220 13% 91%;          /* #E5E7EB - Soft Gray */
+    --input: 0 0% 100%;             /* #FFFFFF - White (same as card) */
+    --ring: 231 60% 57%;            /* #4C5FD5 - Indigo Blue (Primary) */
 
-    --radius: 1rem;               /* Increased radius for rounder corners */
+    --radius: 1rem;               /* Increased radius for rounder corners (matches rounded-xl/2xl use) */
 
-    /* Chart colors (kept default) */
+    /* Chart colors (kept default - can customize if charts are added) */
     --chart-1: 12 76% 61%;
     --chart-2: 173 58% 39%;
     --chart-3: 197 37% 24%;
@@ -59,45 +58,45 @@ h1, h2, h3, h4, h5, h6 {
     --chart-5: 27 87% 67%;
 
     /* Sidebar (kept default, adjust if sidebar is used later) */
-    --sidebar-background: 210 40% 98%; /* Use main background */
-    --sidebar-foreground: 215 28% 17%; /* Use main foreground */
+    --sidebar-background: 228 33% 98%; /* Use main background */
+    --sidebar-foreground: 221 39% 28%; /* Use main foreground */
     --sidebar-primary: 231 60% 57%;    /* Use main primary */
     --sidebar-primary-foreground: 0 0% 100%;
     --sidebar-accent: 173 58% 39%;     /* Use main accent */
     --sidebar-accent-foreground: 0 0% 100%;
-    --sidebar-border: 215 14% 91%;    /* Use main border */
+    --sidebar-border: 220 13% 91%;    /* Use main border */
     --sidebar-ring: 231 60% 57%;       /* Use main ring */
   }
 
   .dark {
-    /* Dark Theme Colors - Based on NEW PALETTE */
-    --background: 222 47% 11%;     /* Dark Slate #111827 */
-    --foreground: 215 14% 83%;     /* Light Gray #D1D5DB */
+    /* Dark Theme Colors - Inverted NEW PALETTE */
+    --background: 222 47% 11%;     /* #111827 - Dark Slate */
+    --foreground: 215 14% 83%;     /* #D1D5DB - Light Gray */
 
-    --card: 215 28% 17%;           /* Slightly Lighter Dark Slate #1F2937 */
-    --card-foreground: 215 14% 83%; /* Light Gray #D1D5DB */
+    --card: 221 39% 17%;           /* #1F2937 - Slightly Lighter Dark Slate */
+    --card-foreground: 215 14% 83%; /* #D1D5DB - Light Gray */
 
-    --popover: 215 28% 17%;          /* Slightly Lighter Dark Slate #1F2937 */
-    --popover-foreground: 215 14% 83%; /* Light Gray #D1D5DB */
+    --popover: 221 39% 17%;          /* #1F2937 - Slightly Lighter Dark Slate */
+    --popover-foreground: 215 14% 83%; /* #D1D5DB - Light Gray */
 
-    --primary: 239 83% 68%;         /* Lighter Indigo #6366F1 */
+    --primary: 239 83% 68%;         /* #6366F1 - Lighter Indigo */
     --primary-foreground: 222 47% 11%; /* Dark Slate for contrast */
 
-    --secondary: 34 70% 60%;         /* Slightly Lighter Orange #F0974B */
+    --secondary: 34 70% 60%;         /* #F0974B - Slightly Lighter Orange */
     --secondary-foreground: 222 47% 11%; /* Dark Slate for contrast */
 
-    --muted: 216 13% 34%;           /* Darker Gray #4B5563 */
-    --muted-foreground: 216 9% 64%;  /* Mid Gray #9CA3AF */
+    --muted: 217 19% 27%;           /* #374151 - Darker Gray */
+    --muted-foreground: 216 10% 61%;  /* #9CA3AF - Mid Gray */
 
-    --accent: 170 70% 64%;          /* Lighter Teal #5EEAD4 */
+    --accent: 170 70% 64%;          /* #5EEAD4 - Lighter Teal */
     --accent-foreground: 222 47% 11%; /* Dark Slate for contrast */
 
-    --destructive: 0 91% 71%;         /* Lighter Red #F87171 */
-    --destructive-foreground: 0 60% 30%; /* Dark Red #7F1D1D */
+    --destructive: 0 63% 31%;         /* Darker Red */
+    --destructive-foreground: 0 0% 98%; /* White */
 
-    --border: 217 19% 27%;          /* Darker Gray #374151 */
-    --input: 217 19% 27%;           /* Darker Gray #374151 */
-    --ring: 239 83% 68%;            /* Lighter Indigo #6366F1 */
+    --border: 217 19% 27%;          /* #374151 - Darker Gray */
+    --input: 217 19% 27%;           /* #374151 - Darker Gray */
+    --ring: 239 83% 68%;            /* #6366F1 - Lighter Indigo */
 
     /* Chart colors (kept default dark) */
     --chart-1: 220 70% 50%;
@@ -115,7 +114,6 @@ h1, h2, h3, h4, h5, h6 {
     --sidebar-accent-foreground: 222 47% 11%;
     --sidebar-border: 217 19% 27%;    /* Use dark border */
     --sidebar-ring: 239 83% 68%;       /* Use dark ring */
-
   }
 }
 
@@ -157,7 +155,7 @@ h1, h2, h3, h4, h5, h6 {
 
     /* Code blocks within prose */
     pre {
-       @apply bg-muted/20 border border-border/30 rounded-lg p-4 shadow-sm overflow-x-auto; /* Subtle background */
+       @apply bg-muted/20 border border-border/30 rounded-xl p-4 shadow-sm overflow-x-auto; /* Subtle background, more rounded */
        code {
          @apply bg-transparent p-0 border-none text-sm; /* Reset inline code styles within pre */
          color: hsl(var(--foreground)); /* Inherit foreground */
@@ -166,7 +164,7 @@ h1, h2, h3, h4, h5, h6 {
 
     /* Inline code */
      code:not(pre > code) {
-      @apply bg-muted/30 text-foreground px-1.5 py-0.5 rounded-md text-[0.9em] font-mono border border-border/20 shadow-sm; /* Subtle background */
+      @apply bg-muted/30 text-foreground px-1.5 py-0.5 rounded-lg text-[0.9em] font-mono border border-border/20 shadow-sm; /* Subtle background, more rounded */
       word-wrap: break-word;
     }
     /* Remove default backticks added by prose */
@@ -178,7 +176,8 @@ h1, h2, h3, h4, h5, h6 {
     /* Headings */
     h1, h2, h3, h4, h5, h6 {
       color: hsl(var(--foreground));
-      @apply mb-2 mt-4 font-semibold; /* Match Poppins/heading font */
+      font-family: var(--font-geist-sans), sans-serif; /* Ensure heading font */
+      @apply mb-2 mt-4 font-semibold;
     }
 
     /* Blockquotes */

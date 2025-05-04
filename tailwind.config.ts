@@ -13,6 +13,7 @@ export default {
       fontFamily: {
         // Add Inter to the sans-serif stack
         sans: ["var(--font-inter)", ...fontFamily.sans],
+        heading: ["var(--font-geist-sans)", ...fontFamily.sans], // Define heading font family
       },
   		colors: {
   			background: 'hsl(var(--background))',
@@ -134,15 +135,15 @@ export default {
             '--tw-prose-invert-pre-bg': 'hsl(var(--card))',
             '--tw-prose-invert-th-borders': 'hsl(var(--border))',
             '--tw-prose-invert-td-borders': 'hsl(var(--border))',
-             // Specific element styles (kept for structure/non-color adjustments)
+             // Specific element styles
              'code::before': { content: 'none' },
              'code::after': { content: 'none' },
              blockquote: {
-               fontStyle: 'normal', // Keeping italic via class if needed
+               fontStyle: 'normal', // Using class instead for control
              },
              'h1,h2,h3,h4,h5,h6': {
-               fontFamily: `var(--font-geist-sans), ${theme('fontFamily.sans').join(', ')}`, // Explicitly set heading font
-               fontWeight: theme('fontWeight.semibold'), // Use theme value
+               fontFamily: theme('fontFamily.heading').join(', '), // Use defined heading font family
+               fontWeight: theme('fontWeight.semibold'), // Use theme value for semi-bold
              },
              // Add other non-color structural overrides if needed
           },
