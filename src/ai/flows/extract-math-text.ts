@@ -6,128 +6,215 @@
  * - extractMathText - A function that takes an image data URI and returns the extracted text.
  * - ExtractMathTextInput - The input type for the extractMathText function.
  * - ExtractMathTextOutput - The return type for the extractMathText function.
+ * - PreprocessedImageOutput - The return type including the preprocessed image URI.
  */
 
 import { ai } from '@/ai/ai-instance';
 import { z } from 'genkit';
+import { CandidateData } from 'genkit/ai'; // Import CandidateData for safety check
+import { preprocessImageForOcr } from './image-preprocessing'; // Corrected import path
 
-const ExtractMathTextInputSchema = z.object({
-  imageDataUri: z
+
+// Define reusable schemas
+const ImageDataUriSchema = z
     .string()
     .describe(
       "An image containing a math expression (printed or handwritten), as a data URI that must include a MIME type and use Base64 encoding. Expected format: 'data:<mimetype>;base64,<encoded_data>'."
-    ),
+    );
+
+const ExtractMathTextInputSchema = z.object({
+  imageDataUri: ImageDataUriSchema,
 });
 export type ExtractMathTextInput = z.infer<typeof ExtractMathTextInputSchema>;
 
-const ExtractMathTextOutputSchema = z.object({
-  extractedText: z
+
+const ExtractedTextSchema = z
     .string()
-    .describe('The mathematical text extracted from the image, focusing only on the expression itself, or "NO_TEXT_FOUND" if no clear mathematical expression could be reliably identified, or "OCR_PROCESSING_ERROR" if the extraction process failed.'),
+    .describe('The mathematical text extracted from the image, focusing only on the expression itself. If NO clear mathematical expression is found, respond with the exact string "NO_TEXT_FOUND". Do not include explanations or formatting.');
+
+// Include preprocessed image in output
+const ExtractMathTextOutputSchema = z.object({
+  extractedText: ExtractedTextSchema,
+  preprocessedImageUri: z.string().optional().describe("Data URI of the preprocessed image used for OCR, if available."),
 });
 export type ExtractMathTextOutput = z.infer<typeof ExtractMathTextOutputSchema>;
 
+
+// --- Constants ---
+const NO_TEXT_FOUND_MARKER = "NO_TEXT_FOUND";
+const OCR_PROCESSING_ERROR_MARKER = "OCR_PROCESSING_ERROR";
+const OCR_BLOCKED_BY_SAFETY_MARKER = "OCR_BLOCKED_BY_SAFETY";
+const PREPROCESSING_ERROR_MARKER = "PREPROCESSING_ERROR";
+
+// --- Exported Function ---
+/**
+ * Takes an image data URI, preprocesses it, extracts mathematical text using a Genkit flow.
+ * @param input - Object containing the image data URI.
+ * @returns Object containing the extracted text, preprocessed image URI, or an error marker.
+ */
 export async function extractMathText(input: ExtractMathTextInput): Promise<ExtractMathTextOutput> {
-  // Basic check for valid data URI format - this is a weak check
+  // Basic data URI validation
   if (!input.imageDataUri || !input.imageDataUri.startsWith('data:image/')) {
       console.error("Invalid imageDataUri format provided to extractMathText:", input.imageDataUri?.substring(0, 50) + "...");
-      return { extractedText: "OCR_PROCESSING_ERROR" };
+      return { extractedText: OCR_PROCESSING_ERROR_MARKER };
   }
-  return extractMathTextFlow(input);
+
+  // --- Image Preprocessing ---
+  let preprocessedImageDataUri: string | undefined;
+  try {
+    console.log("Starting image preprocessing...");
+    preprocessedImageDataUri = await preprocessImageForOcr(input.imageDataUri);
+    console.log("Image preprocessing successful (or skipped by placeholder).");
+  } catch (error) {
+    console.error("Error during image preprocessing:", error);
+    // Decide if we should proceed with the original image or fail
+    // For now, let's try proceeding with the original image but log the error
+    // return { extractedText: PREPROCESSING_ERROR_MARKER }; // Option to fail hard
+    preprocessedImageDataUri = input.imageDataUri; // Fallback to original
+    console.warn("Preprocessing failed, falling back to original image for OCR.");
+  }
+
+  if (!preprocessedImageDataUri) {
+      console.error("Preprocessed image data URI is missing after processing/fallback.");
+      return { extractedText: OCR_PROCESSING_ERROR_MARKER };
+  }
+
+  // Call the Genkit flow with the potentially preprocessed image
+  const flowResult = await extractMathTextFlow({ imageDataUri: preprocessedImageDataUri });
+
+  // Return the flow result along with the preprocessed image URI
+  return {
+    ...flowResult,
+    // Only include preprocessed URI if it's actually different (not just the placeholder fallback)
+    preprocessedImageUri: preprocessedImageDataUri !== input.imageDataUri ? preprocessedImageDataUri : undefined,
+  };
 }
 
+
+// --- Genkit Prompt Definition ---
 const prompt = ai.definePrompt({
   name: 'extractMathTextPrompt',
   input: {
-    schema: z.object({
-      imageDataUri: z
-        .string()
-        .describe(
-          "An image containing a math expression (printed or handwritten), as a data URI that must include a MIME type and use Base64 encoding. Expected format: 'data:<mimetype>;base64,<encoded_data>'."
-        ),
-    }),
+    // Input is just the image data URI (potentially preprocessed)
+    schema: z.object({ imageDataUri: ImageDataUriSchema }),
   },
   output: {
-    schema: z.object({
-      extractedText: z
-        .string()
-        .describe('The mathematical text extracted from the image, focusing only on the expression itself. If NO clear mathematical expression is found, respond with the exact string "NO_TEXT_FOUND".'),
-    }),
+    // Output is just the extracted text object
+    schema: z.object({ extractedText: ExtractedTextSchema }),
   },
-  model: 'googleai/gemini-pro-vision', // Use Vision model
-  prompt: `Analyze the provided image VERY carefully. Your primary goal is to identify and extract ONLY the main mathematical expression(s) present, whether printed or handwritten. Be precise and robust.
+  model: 'googleai/gemini-1.5-flash', // Use 1.5 Flash as it's good with vision and faster/cheaper than Pro
+  // Simplified prompt to avoid complex formatting issues in the template string
+  prompt: `TASK: Analyze the provided image. Extract only the primary mathematical expression(s). Ignore all non-mathematical content. Be precise.
 
-Image: {{media url=imageDataUri}}
+IMAGE: {{media url=imageDataUri}}
 
-Detailed Instructions:
-1.  **Strict Focus on Math:** Extract *only* the mathematical symbols, numbers, variables (like x, y, a, b), standard function names (sin, cos, log, ln, sqrt), operators (+, -, *, /, ^), equals signs (=), parentheses/brackets (), and fraction bars.
-2.  **Ignore Non-Math Elements:** Absolutely ignore surrounding text (like question numbers, instructions), background noise, paper lines, grids, shadows, fingers, page edges, or other non-mathematical visual elements. If the image contains multiple unrelated items, focus *only* on the math part.
-3.  **Handwriting Challenges:** Be prepared for variations in handwriting. Interpret ambiguous characters in the context of a mathematical expression (e.g., a handwritten 'l' might be '1', 'O' might be '0', 'S' might be '5', 't' might be '+'). Make the most plausible interpretation.
-4.  **Preserve Structure:** Maintain the original mathematical structure, including fractions (represent as 'numerator/denominator'), exponents (use '^'), subscripts (use '_'), parentheses, and the order of operations. Use standard ASCII math symbols. Use '*' for multiplication where explicitly written or clearly implied between numbers/variables if needed for clarity, but prefer implicit multiplication (e.g., '2x') where standard.
-5.  **Output Format:**
-    *   If a clear mathematical expression is successfully extracted, return *only* that expression as a single line of plain text. Do NOT add any explanation, commentary, greetings, or markdown formatting (like \`\`\`).
-    *   If the image is blurry, unclear, contains no discernible mathematical content, or if you cannot reliably extract any math expression despite trying, return the exact string "NO_TEXT_FOUND". Do not guess wildly if unsure. Do not return empty strings.
-    *   Do NOT output explanations like "The extracted text is..." or "I found...". Just the math expression or "NO_TEXT_FOUND".
+SPECIFIC RULES:
+1. Focus ONLY on math: numbers, variables, operators (+, -, *, /, ^, sqrt, sin, cos, log, etc.), brackets, fractions.
+2. IGNORE ALL non-math text, labels, noise, backgrounds.
+3. Interpret handwriting contextually (e.g., 'l' as '1', 'O' as '0', 'S' as '5', 't' as '+'). Use '*' for multiplication if needed, prefer implicit (2x).
+4. Preserve structure: Use '/' for fractions, '^' for exponents, '_' for subscripts, 'sqrt()' for square roots.
+5. Output Format:
+   - Success: Return ONLY the extracted math expression as plain text. Example: 2x + 3y = 7
+   - Failure (No Math Found/Unclear): Return the exact string: NO_TEXT_FOUND
+   - DO NOT add explanations or markdown.
 
 Extracted Mathematical Text:`,
 });
 
+// --- Genkit Flow Definition ---
+// Input is the same (image URI), Output is simplified to just { extractedText: string }
 const extractMathTextFlow = ai.defineFlow<
-  typeof ExtractMathTextInputSchema,
-  typeof ExtractMathTextOutputSchema
+  typeof ExtractMathTextInputSchema, // Input schema remains the same
+  z.ZodObject<{ extractedText: typeof ExtractedTextSchema }> // Output schema for the *flow*
 >({
   name: 'extractMathTextFlow',
   inputSchema: ExtractMathTextInputSchema,
-  outputSchema: ExtractMathTextOutputSchema,
-}, async input => {
+  outputSchema: z.object({ extractedText: ExtractedTextSchema }), // Simplified flow output schema
+}, async (input) => { // Input now contains the potentially preprocessed imageDataUri
  try {
-    console.log("Calling Gemini Vision for math text extraction with enhanced prompt...");
-    const { output } = await prompt(input);
-    console.log("Raw Vision API Output:", output); // Log the raw output
+    console.log("Calling Gemini 1.5 Flash Vision for math text extraction...");
 
-    // Ensure output and extractedText are not null/undefined
-    if (!output || output.extractedText === null || output.extractedText === undefined) {
-        console.error("OCR flow received null or undefined output from the model. Returning OCR_PROCESSING_ERROR.");
-        return { extractedText: "OCR_PROCESSING_ERROR" }; // Treat unexpected null/undefined as a processing error
+    // Make the API call using the prompt
+    // The prompt itself expects { imageDataUri: string } and outputs { extractedText: string }
+    const response = await prompt(input);
+
+    // Log the raw response for debugging
+    console.log("Raw Vision API Response:", JSON.stringify(response, null, 2));
+
+    // --- Safety Checks and Output Processing ---
+
+    // Check for basic output presence from the prompt call
+    if (!response || !response.output) {
+        console.error("OCR flow received null or empty response structure from the model. Returning OCR_PROCESSING_ERROR.");
+        return { extractedText: OCR_PROCESSING_ERROR_MARKER };
     }
 
-    // Trim whitespace from the result
-    const trimmedText = output.extractedText.trim();
+     // Check if the response was blocked due to safety settings
+    const candidate = response as CandidateData; // Type assertion for inspection
+    if (candidate?.finishReason && candidate.finishReason === 'SAFETY') {
+        console.error("Model response was blocked due to safety settings.");
+        return { extractedText: OCR_BLOCKED_BY_SAFETY_MARKER };
+    }
+    if (candidate?.finishReason && candidate.finishReason !== 'STOP' && candidate.finishReason !== 'MODEL') {
+         // Log other non-standard finish reasons
+         console.warn(`Model response finished with unusual reason: ${candidate.finishReason}`);
+    }
+
+
+    // Check if output is structured as expected { extractedText: string }
+    if (!('extractedText' in response.output)) {
+        console.error("OCR flow received unexpected output structure:", response.output);
+        return { extractedText: OCR_PROCESSING_ERROR_MARKER }; // Generic error if structure is wrong
+    }
+
+    // Now safely access extractedText
+    const extracted = response.output.extractedText;
+
+    // Handle null/undefined extractedText explicitly
+    if (extracted === null || extracted === undefined) {
+        console.warn("Model returned null or undefined for extractedText. Interpreting as NO_TEXT_FOUND.");
+        return { extractedText: NO_TEXT_FOUND_MARKER };
+    }
+
+    // Trim whitespace
+    const trimmedText = extracted.trim();
     console.log("Trimmed extracted text:", trimmedText);
 
-    // Check if, after trimming, the string is empty or explicitly "NO_TEXT_FOUND"
-    if (trimmedText === "" || trimmedText.toUpperCase() === "NO_TEXT_FOUND") {
-      console.log("Model returned empty string or NO_TEXT_FOUND. Final result: NO_TEXT_FOUND");
-      return { extractedText: "NO_TEXT_FOUND" };
+    // Check for explicit "NO_TEXT_FOUND" marker or empty string after trim
+    if (trimmedText === "" || trimmedText.toUpperCase() === NO_TEXT_FOUND_MARKER) {
+      console.log(`Model returned empty string or explicit ${NO_TEXT_FOUND_MARKER}. Final result: ${NO_TEXT_FOUND_MARKER}`);
+      return { extractedText: NO_TEXT_FOUND_MARKER };
     }
 
-    // Further check: Sometimes the model might just return non-math descriptive text despite instructions.
-    // This is a heuristic: If the text contains very few math-related characters, consider it as NO_TEXT_FOUND.
-    const mathChars = /[0-9xXyYaAbBcCnN+\-*/^=()\[\]{}<>_.,|√∑∫∂∞≈≠≤≥∈∉∀∃∴∵]/;
-    const nonMathCharsThreshold = 0.7; // If > 70% chars are NOT common letters/numbers/math symbols
-    let nonMathCount = 0;
-    for (const char of trimmedText) {
-        if (!mathChars.test(char) && !/[a-zA-Z]/.test(char)) { // Allow letters for variables/functions
-             nonMathCount++;
-        }
+    // Basic Heuristic Check: Ensure it contains *some* math-related characters.
+    // This is a weak check; the prompt is the primary guard.
+    const hasMathChars = /[0-9xXyYzZaAbBcCnN+\-*/^=()\[\]{}<>_.,|√∑∫∂∞≈≠≤≥∈∉∀∃∴∵]|sin|cos|tan|log|ln|sqrt|lim|sum|int/i.test(trimmedText);
+
+    if (!hasMathChars) {
+        console.warn(`Extracted text "${trimmedText}" seems to lack common math characters. Treating as ${NO_TEXT_FOUND_MARKER}.`);
+        return { extractedText: NO_TEXT_FOUND_MARKER };
     }
-     if (trimmedText.length > 0 && (nonMathCount / trimmedText.length) > nonMathCharsThreshold) {
-        console.warn(`Extracted text "${trimmedText}" seems non-mathematical based on character analysis. Treating as NO_TEXT_FOUND.`);
-        return { extractedText: "NO_TEXT_FOUND" };
-     }
 
 
-    // Return the trimmed result
-    console.log("Returning potentially valid extracted text:", trimmedText);
+    // Return the potentially valid, trimmed result
+    console.log("Returning valid extracted text:", trimmedText);
     return { extractedText: trimmedText };
 
-  } catch (error) {
+  } catch (error: unknown) { // Catch unknown type
       console.error("Error executing extractMathTextFlow:", error);
-       // Log the specific error for debugging
-       const errorMsg = error instanceof Error ? error.message : "An unknown error occurred during OCR.";
+       const errorMsg = error instanceof Error ? error.message : String(error);
        console.error("Underlying error:", errorMsg);
 
-       // Return the specific error indicator for the UI
-       return { extractedText: "OCR_PROCESSING_ERROR" };
+       // Check if the error is related to API key or permissions
+       if (errorMsg.includes('API key not valid') || errorMsg.includes('permission denied')) {
+           console.error("API Key or Permission Error detected.");
+           return { extractedText: "API_ERROR_INVALID_KEY" }; // Specific marker
+       }
+        if (errorMsg.includes('quota') || errorMsg.includes('Quota')) {
+           console.error("Quota Exceeded Error detected.");
+           return { extractedText: "API_ERROR_QUOTA" }; // Specific marker
+       }
+
+       return { extractedText: OCR_PROCESSING_ERROR_MARKER };
   }
 });

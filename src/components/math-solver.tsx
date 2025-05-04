@@ -2,6 +2,7 @@
 "use client";
 
 import React, { useState, useCallback, useEffect } from 'react';
+import Image from 'next/image'; // Import Image component
 import { fixOcrErrors } from '@/ai/flows/fix-ocr-errors';
 import { extractMathText } from '@/ai/flows/extract-math-text';
 import { solveMathExpression } from '@/ai/flows/solve-math-expression';
@@ -21,7 +22,8 @@ const OCR_PROCESSING_ERROR_MESSAGE = "OCR_PROCESSING_ERROR";
 const MATH_AI_ERROR_PREFIX = "Error:"; // Standard prefix for errors from AI flows
 
 export function MathSolver() {
-  const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [imageUrl, setImageUrl] = useState<string | null>(null); // Original uploaded image preview URL
+  const [preprocessedImageUrl, setPreprocessedImageUrl] = useState<string | null>(null); // Preprocessed image preview URL
   const [ocrText, setOcrText] = useState<string>(''); // Raw text from vision model
   const [correctedText, setCorrectedText] = useState<string>(''); // Text after correction/user edit, used for solving
   const [solution, setSolution] = useState<string>('');
@@ -43,11 +45,20 @@ export function MathSolver() {
     setOcrText('');
     setCorrectedText('');
     setSolution('');
+    setPreprocessedImageUrl(null); // Reset preprocessed image
 
     console.log("Calling extractMathText flow...");
     try {
       const ocrResult = await extractMathText({ imageDataUri });
       console.log("OCR Result Received:", ocrResult);
+
+      // Set preprocessed image URL if available in the result
+      if (ocrResult?.preprocessedImageUri) {
+          setPreprocessedImageUrl(ocrResult.preprocessedImageUri);
+          console.log("Preprocessed image URI received.");
+      } else {
+          console.log("No preprocessed image URI received.");
+      }
 
       if (!ocrResult || typeof ocrResult.extractedText !== 'string') {
         console.error("Received invalid or null response structure from OCR service.");
@@ -197,6 +208,7 @@ export function MathSolver() {
     setOcrText('');
     setCorrectedText('');
     setSolution('');
+    setPreprocessedImageUrl(null); // Reset preprocessed image URL
 
     // Convert file to data URI for Genkit Vision model
     const reader = new FileReader();
@@ -239,7 +251,12 @@ export function MathSolver() {
     if (imageUrl && imageUrl.startsWith('blob:')) {
       URL.revokeObjectURL(imageUrl);
     }
+    // Assuming preprocessedImageUrl might also be a blob URL if generated client-side in the future
+    if (preprocessedImageUrl && preprocessedImageUrl.startsWith('blob:')) {
+        URL.revokeObjectURL(preprocessedImageUrl);
+    }
     setImageUrl(null);
+    setPreprocessedImageUrl(null); // Clear preprocessed image
     setFile(null);
     setOcrText('');
     setCorrectedText('');
@@ -298,7 +315,7 @@ export function MathSolver() {
         </Alert>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
 
         {/* 1. Image Upload Panel */}
         <Card className="shadow-md rounded-lg border border-border flex flex-col">
@@ -312,7 +329,7 @@ export function MathSolver() {
               imageUrl={imageUrl}
               setImageUrl={setImageUrl}
               setFile={setFile}
-              className="flex-grow mb-4" // Uploader takes available space
+              className="flex-grow mb-4 min-h-[250px]" // Uploader takes available space
             />
             {isLoadingOcr && (
               <div className="mt-auto flex items-center justify-center text-muted-foreground p-2">
@@ -327,7 +344,7 @@ export function MathSolver() {
         <Card className="shadow-md rounded-lg border border-border flex flex-col">
           <CardHeader>
             <CardTitle className="text-lg font-semibold">2. Verify & Solve</CardTitle>
-            <CardDescription>Review OCR, edit if needed, then Solve.</CardDescription>
+            <CardDescription>Review OCR, Preprocessed Image, Edit, then Solve.</CardDescription>
           </CardHeader>
           <CardContent className="relative flex flex-col flex-grow p-4">
             {/* Unified Loading Overlay */}
@@ -335,12 +352,12 @@ export function MathSolver() {
                <div className="absolute inset-0 bg-background/80 flex flex-col items-center justify-center z-10 rounded-md p-4 text-center">
                  <LoadingSpinner />
                  <span className="ml-2 mt-2 text-muted-foreground">
-                   {isLoadingOcr ? 'Extracting...' : 'AI correcting...'}
+                   {isLoadingOcr ? 'Processing Image...' : 'AI correcting...'}
                  </span>
                </div>
             )}
 
-            {/* Text Areas Container */}
+            {/* Text Areas & Preprocessed Image Container */}
             <div className="flex flex-col flex-grow gap-4 mb-4">
                  {/* Raw OCR Output (Readonly) */}
                  <div className="flex-1 flex flex-col">
@@ -350,10 +367,32 @@ export function MathSolver() {
                         value={rawOcrDisplayText} // Use derived display text
                         readOnly
                         placeholder={isLoadingOcr ? "Extracting..." : "Raw OCR output appears here..."}
-                        className="min-h-[100px] bg-secondary/50 text-muted-foreground resize-none flex-grow"
+                        className="min-h-[80px] bg-secondary/50 text-muted-foreground resize-none flex-grow"
                         aria-label="Raw OCR Output (Readonly)"
                      />
                  </div>
+
+                 {/* Preprocessed Image Preview */}
+                 <div className="flex-1 flex flex-col">
+                    <label className="text-sm font-medium text-muted-foreground block mb-1">Preprocessed Image (if generated):</label>
+                    <div className="border rounded-md p-2 bg-secondary/30 min-h-[100px] flex items-center justify-center">
+                        {preprocessedImageUrl ? (
+                            <Image
+                                src={preprocessedImageUrl}
+                                alt="Preprocessed Math Expression"
+                                width={300}
+                                height={150}
+                                className="max-h-[150px] w-auto object-contain rounded-sm"
+                                data-ai-hint="preprocessed math equation"
+                            />
+                        ) : (
+                            <span className="text-xs text-muted-foreground">
+                                {isLoadingOcr ? 'Generating...' : imageUrl ? 'No preprocessing applied or needed.' : 'Upload image first.'}
+                            </span>
+                        )}
+                    </div>
+                 </div>
+
 
                  {/* Parsed Expression (Editable) */}
                  <div className="flex-1 flex flex-col">
@@ -363,7 +402,7 @@ export function MathSolver() {
                         value={correctedText} // Bound to the state updated by correction and user edits
                         onChange={handleTextChange}
                         placeholder={correctedTextPlaceholder} // Use derived placeholder
-                        className="min-h-[100px] focus:ring-primary focus:border-primary resize-none flex-grow"
+                        className="min-h-[80px] focus:ring-primary focus:border-primary resize-none flex-grow"
                         aria-label="Parsed Expression (Editable)"
                         disabled={isProcessing || !ocrText || ocrText === OCR_PROCESSING_ERROR_MESSAGE} // Disable if processing or OCR failed/empty
                      />
@@ -401,7 +440,7 @@ export function MathSolver() {
              )}
 
             {/* Scrollable Solution Area */}
-            <ScrollArea className="flex-grow border bg-secondary/30 p-4 rounded-md mb-4 min-h-[240px]">
+            <ScrollArea className="flex-grow border bg-secondary/30 p-4 rounded-md mb-4 min-h-[300px]">
                 {solution ? (
                     <pre className="text-sm font-mono whitespace-pre-wrap break-words text-foreground">{solution}</pre>
                 ) : (
