@@ -24,7 +24,6 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className={`${GeistSans.variable} ${inter.variable}`}> {/* Add Inter variable */}
-      {/* Ensure no whitespace between <html> and <body> */}
       <body className={`antialiased bg-background text-foreground font-sans`}> {/* Use sans font family */}
         <header className="container mx-auto p-4 md:py-6">
            {/* Adjusted header styling: more padding, slightly less shadow */}
