@@ -13,9 +13,10 @@ interface ImageUploaderProps {
   imageUrl: string | null;
   setImageUrl: (url: string | null) => void;
   setFile: (file: File | null) => void;
+  className?: string; // Added className prop
 }
 
-export function ImageUploader({ onImageUpload, imageUrl, setImageUrl, setFile }: ImageUploaderProps) {
+export function ImageUploader({ onImageUpload, imageUrl, setImageUrl, setFile, className }: ImageUploaderProps) {
   const [isDragging, setIsDragging] = useState(false);
 
   const onDrop = useCallback(
@@ -23,17 +24,24 @@ export function ImageUploader({ onImageUpload, imageUrl, setImageUrl, setFile }:
       setIsDragging(false);
       if (acceptedFiles && acceptedFiles.length > 0) {
         const file = acceptedFiles[0];
-        const reader = new FileReader();
-        reader.onloadend = () => {
-          setImageUrl(reader.result as string);
-          setFile(file);
-          onImageUpload(file);
-        };
-        reader.readAsDataURL(file);
+        // No need for FileReader here if handleImageUpload expects a File
+        setImageUrl(URL.createObjectURL(file)); // Create temporary URL for preview
+        setFile(file);
+        onImageUpload(file); // Pass the File object directly
       }
     },
     [onImageUpload, setImageUrl, setFile]
   );
+
+   // Cleanup temporary URL when component unmounts or imageUrl changes
+   React.useEffect(() => {
+     return () => {
+       if (imageUrl && imageUrl.startsWith('blob:')) {
+         URL.revokeObjectURL(imageUrl);
+       }
+     };
+   }, [imageUrl]);
+
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
@@ -45,15 +53,20 @@ export function ImageUploader({ onImageUpload, imageUrl, setImageUrl, setFile }:
 
   const handleClear = (e: React.MouseEvent) => {
     e.stopPropagation(); // Prevent triggering the dropzone click
+    if (imageUrl && imageUrl.startsWith('blob:')) {
+        URL.revokeObjectURL(imageUrl); // Clean up blob URL
+    }
     setImageUrl(null);
     setFile(null);
+    // Optionally call a prop function to notify parent about clearing
+    // onImageClear?.();
   };
 
   return (
-    <Card className={cn("border-2 border-dashed hover:border-primary transition-colors", isDragging || isDragActive ? "border-primary bg-accent/10" : "")}>
+    <Card className={cn("border-2 border-dashed hover:border-primary transition-colors h-full", isDragging || isDragActive ? "border-primary bg-accent/10" : "", className)}>
       <CardContent
         {...getRootProps()}
-        className={cn("relative flex flex-col items-center justify-center p-6 min-h-[200px] cursor-pointer text-center")}
+        className={cn("relative flex flex-col items-center justify-center p-6 min-h-[200px] cursor-pointer text-center h-full")} // Added h-full
       >
         <input {...getInputProps()} />
         {imageUrl ? (
@@ -70,7 +83,7 @@ export function ImageUploader({ onImageUpload, imageUrl, setImageUrl, setFile }:
               variant="ghost"
               size="icon"
               onClick={handleClear}
-              className="absolute top-2 right-2 bg-background/80 hover:bg-destructive/80 hover:text-destructive-foreground rounded-full"
+              className="absolute top-2 right-2 bg-background/80 hover:bg-destructive/80 hover:text-destructive-foreground rounded-full z-10" // Ensure button is clickable
               aria-label="Clear image"
             >
               <X className="h-4 w-4" />

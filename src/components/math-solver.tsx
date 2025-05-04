@@ -2,54 +2,16 @@
 
 import React, { useState } from 'react';
 import { fixOcrErrors } from '@/ai/flows/fix-ocr-errors';
+import { extractMathText } from '@/ai/flows/extract-math-text'; // Import new OCR flow
+import { solveMathExpression } from '@/ai/flows/solve-math-expression'; // Import new solver flow
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
 import { ImageUploader } from '@/components/image-uploader';
 import { LoadingSpinner } from '@/components/loading-spinner';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Wand2, Eraser } from 'lucide-react';
+import { Wand2, Eraser, BrainCircuit } from 'lucide-react'; // Added BrainCircuit icon
 import { useToast } from "@/hooks/use-toast";
-
-// Mock solver function - replace with actual Python backend call if needed later
-// For now, we simulate solving common patterns.
-const mockSolveEquation = async (equation: string): Promise<string> => {
-  await new Promise(resolve => setTimeout(resolve, 500)); // Simulate network delay
-
-  // Simple mock logic
-  if (equation.includes('^2')) { // Quadratic
-      if (equation.trim() === 'x^2 + 5x + 6 = 0' || equation.trim() === 'x**2 + 5*x + 6 = 0') {
-          return 'x = -2, x = -3';
-      }
-      return 'Solution: Quadratic detected (mock solution)';
-  } else if (equation.includes('+') || equation.includes('-') || equation.includes('*') || equation.includes('/')) { // Linear or simple arithmetic
-      if (equation.trim() === '2x + 3 = 9' || equation.trim() === '2*x + 3 = 9') {
-          return 'x = 3';
-      }
-      if (equation.includes('x') && equation.includes('y')) { // System of equations
-          if ( (equation.includes('x + y = 5') || equation.includes('x+y=5')) && (equation.includes('x - y = 1') || equation.includes('x-y=1'))) {
-             return 'x = 3, y = 2';
-          }
-          return 'Solution: System of equations detected (mock solution)'
-      }
-       // Attempt basic eval for simple arithmetic if no variables
-      if (!/[a-zA-Z]/.test(equation)) {
-        try {
-           // Basic safety: only allow numbers, operators, spaces, dots.
-           if (/^[\d\s\+\-\*\/\.\(\)]+$/.test(equation.replace(/\s+/g, ''))) {
-             // eslint-disable-next-line no-eval
-             const result = eval(equation.replace('=', ''));
-             return `Result: ${result}`;
-           }
-        } catch (e) {
-            // Ignore eval errors
-        }
-      }
-      return 'Solution: Linear or arithmetic detected (mock solution)';
-  }
-  return 'Solution: Cannot determine equation type (mock solution)';
-};
-
 
 export function MathSolver() {
   const [imageUrl, setImageUrl] = useState<string | null>(null);
@@ -71,28 +33,57 @@ export function MathSolver() {
       setSolution('');
       setIsLoadingOcr(true);
 
-      // --- Mock OCR ---
-      // Simulate OCR extraction delay and provide mock text based on filename patterns
-      await new Promise(resolve => setTimeout(resolve, 1000)); // Simulate OCR processing time
-      let mockOcrResult = "OCR couldn't read the image.";
-      const name = uploadedFile.name.toLowerCase();
-      if (name.includes('linear')) mockOcrResult = '2x + 3 = 9';
-      else if (name.includes('quadratic')) mockOcrResult = 'x^2 + 5x + 6 = 0';
-      else if (name.includes('system')) mockOcrResult = 'x + y = 5\nx - y = 1';
-      else if (name.includes('handwritten_linear')) mockOcrResult = '2x + 4 = I0'; // Simulate OCR error
-      else if (name.includes('handwritten_quadratic')) mockOcrResult = 'x^2 - 5x + 6 = O'; // Simulate OCR error
-      // --- End Mock OCR ---
+      // Convert file to data URI for Genkit Vision model
+      const reader = new FileReader();
+      reader.readAsDataURL(uploadedFile);
+      reader.onload = async () => {
+          const imageDataUri = reader.result as string;
+          setImageUrl(imageDataUri); // Set image preview immediately
+          setFile(uploadedFile);
 
-      setOcrText(mockOcrResult);
-      setIsLoadingOcr(false);
-
-      // Automatically trigger correction after OCR
-      handleCorrection(mockOcrResult);
+          try {
+              // --- Real OCR Call ---
+              const ocrResult = await extractMathText({ imageDataUri });
+              setOcrText(ocrResult.extractedText || "OCR failed to extract text.");
+              if (ocrResult.extractedText) {
+                  // Automatically trigger correction after successful OCR
+                  handleCorrection(ocrResult.extractedText);
+              } else {
+                   toast({
+                      title: "OCR Failed",
+                      description: "Could not extract text from the image.",
+                      variant: "destructive",
+                  });
+              }
+          } catch (err) {
+              console.error("Error extracting text:", err);
+              setError("Failed to extract text from the image. Please try again or ensure the image is clear.");
+              setOcrText("OCR Error.");
+              toast({
+                  title: "OCR Error",
+                  description: "An error occurred during text extraction.",
+                  variant: "destructive",
+              });
+          } finally {
+              setIsLoadingOcr(false);
+          }
+      };
+      reader.onerror = (error) => {
+          console.error("Error reading file:", error);
+          setError("Failed to read the uploaded image file.");
+          setIsLoadingOcr(false);
+           toast({
+                title: "File Read Error",
+                description: "Could not process the uploaded image file.",
+                variant: "destructive",
+            });
+      };
   };
 
   const handleCorrection = async (textToCorrect: string) => {
       if (!textToCorrect) {
         setError("No text to correct.");
+        setIsLoadingCorrection(false); // Ensure loading stops if no text
         return;
       }
       setError(null);
@@ -103,14 +94,14 @@ export function MathSolver() {
           const result = await fixOcrErrors({ ocrText: textToCorrect });
           setCorrectedText(result.correctedText);
           // Automatically trigger solving after correction
-          handleSolve(result.correctedText);
+          // handleSolve(result.correctedText); // Optional: Decide if auto-solve is desired
       } catch (err) {
           console.error("Error correcting OCR text:", err);
-          setError("Failed to correct OCR text. Please check the input or try again.");
+          setError("Failed to correct OCR text. You can edit it manually.");
           setCorrectedText(textToCorrect); // Fallback to original OCR text on error
           toast({
               title: "Correction Failed",
-              description: "Could not automatically correct the text. You can edit it manually.",
+              description: "Could not automatically correct the text. Please edit manually.",
               variant: "destructive",
           });
       } finally {
@@ -120,22 +111,28 @@ export function MathSolver() {
 
 
   const handleSolve = async (equation: string) => {
-    if (!equation) {
-        setError("No equation to solve.");
+    if (!equation?.trim()) {
+        setError("No equation to solve. Please upload an image or enter text.");
         return;
     }
     setError(null);
+    setSolution(''); // Clear previous solution before solving
     setIsLoadingSolution(true);
     try {
-        // Replace with actual backend call if implementing Python backend
-        const result = await mockSolveEquation(equation);
-        setSolution(result);
+        // --- Real Solver Call ---
+        const result = await solveMathExpression({ expression: equation });
+        setSolution(result.solution);
+         toast({
+              title: "Solution Found",
+              description: "The equation has been solved.",
+         });
     } catch (err) {
         console.error("Error solving equation:", err);
-        setError("Failed to solve the equation. Please ensure it's a valid format.");
+        const errorMsg = err instanceof Error ? err.message : "An unknown error occurred.";
+        setError(`Failed to solve the equation: ${errorMsg}. Please check the format or try a different expression.`);
          toast({
               title: "Solving Failed",
-              description: "Could not solve the provided equation.",
+              description: `Could not solve the equation. ${errorMsg}`,
               variant: "destructive",
           });
     } finally {
@@ -167,7 +164,7 @@ export function MathSolver() {
         <CardHeader>
           <CardTitle className="text-2xl font-bold text-center">MathSnap Solver</CardTitle>
           <CardDescription className="text-center text-muted-foreground">
-            Upload an image of a math expression to get it solved.
+            Upload an image of a math expression, let AI extract & correct it, then solve!
           </CardDescription>
         </CardHeader>
       </Card>
@@ -184,6 +181,7 @@ export function MathSolver() {
         <Card className="shadow-md">
           <CardHeader>
             <CardTitle>1. Upload Image</CardTitle>
+             <CardDescription>Upload a clear image of the math problem.</CardDescription>
           </CardHeader>
           <CardContent>
             <ImageUploader
@@ -206,10 +204,11 @@ export function MathSolver() {
           <CardHeader>
             <CardTitle>2. Extracted & Corrected Text</CardTitle>
              <CardDescription>
-                AI corrects common OCR errors. You can edit the text below before solving.
+                AI extracts text, then corrects common OCR errors. Edit below if needed.
              </CardDescription>
           </CardHeader>
-          <CardContent className="relative">
+          <CardContent className="relative flex flex-col h-full">
+             {/* Loading overlay */}
             {(isLoadingOcr || isLoadingCorrection) && (
                <div className="absolute inset-0 bg-background/80 flex items-center justify-center z-10 rounded-md">
                  <LoadingSpinner />
@@ -218,34 +217,40 @@ export function MathSolver() {
                  </span>
                </div>
             )}
-            <div className="mb-4">
-                 <label htmlFor="ocrText" className="text-sm font-medium text-muted-foreground block mb-1">Original OCR Output:</label>
-                 <Textarea
-                    id="ocrText"
-                    value={ocrText}
-                    readOnly
-                    placeholder="OCR output will appear here..."
-                    className="min-h-[100px] bg-secondary/50 text-muted-foreground"
-                    aria-label="Original OCR Output"
-                 />
-            </div>
-            <div>
-                 <label htmlFor="correctedText" className="text-sm font-medium block mb-1">Editable Corrected Text:</label>
-                 <Textarea
-                    id="correctedText"
-                    value={correctedText}
-                    onChange={handleTextChange}
-                    placeholder="Corrected text will appear here. Edit if needed."
-                    className="min-h-[150px] focus:ring-primary focus:border-primary"
-                    aria-label="Editable Corrected Text"
-                 />
+
+            {/* Textareas take available space */}
+            <div className="flex flex-col flex-grow gap-4">
+                 <div className="flex-1">
+                     <label htmlFor="ocrText" className="text-sm font-medium text-muted-foreground block mb-1">Original OCR Output:</label>
+                     <Textarea
+                        id="ocrText"
+                        value={ocrText}
+                        readOnly
+                        placeholder="OCR output will appear here..."
+                        className="min-h-[100px] bg-secondary/50 text-muted-foreground resize-none h-full"
+                        aria-label="Original OCR Output"
+                     />
+                 </div>
+                 <div className="flex-1">
+                     <label htmlFor="correctedText" className="text-sm font-medium block mb-1">Editable Corrected Text:</label>
+                     <Textarea
+                        id="correctedText"
+                        value={correctedText}
+                        onChange={handleTextChange}
+                        placeholder="Corrected text will appear here. Edit if needed."
+                        className="min-h-[100px] focus:ring-primary focus:border-primary resize-none h-full"
+                        aria-label="Editable Corrected Text"
+                     />
+                 </div>
             </div>
 
+            {/* Buttons at the bottom */}
             <div className="mt-4 flex flex-col sm:flex-row gap-2">
                 <Button
                   onClick={() => handleCorrection(ocrText)}
                   disabled={!ocrText || isLoadingOcr || isLoadingCorrection || isLoadingSolution}
                   className="flex-1"
+                  variant="outline"
                 >
                   <Wand2 className="mr-2 h-4 w-4" />
                   Correct with AI
@@ -255,6 +260,7 @@ export function MathSolver() {
                     disabled={!correctedText || isLoadingOcr || isLoadingCorrection || isLoadingSolution}
                     className="flex-1"
                 >
+                    <BrainCircuit className="mr-2 h-4 w-4" /> {/* Changed icon */}
                     Solve Equation
                 </Button>
             </div>
@@ -262,26 +268,30 @@ export function MathSolver() {
         </Card>
 
         {/* Solution Panel */}
-        <Card className="shadow-md">
+        <Card className="shadow-md flex flex-col">
           <CardHeader>
             <CardTitle>3. Solution</CardTitle>
+             <CardDescription>The AI-powered solution appears below.</CardDescription>
           </CardHeader>
-          <CardContent className="relative min-h-[200px]">
+          <CardContent className="relative flex-grow flex flex-col min-h-[200px]">
+             {/* Loading overlay */}
             {isLoadingSolution && (
-                 <div className="absolute inset-0 bg-background/80 flex items-center justify-center z-10 rounded-md">
+                 <div className="absolute inset-0 bg-background/80 flex items-center justify-center z-10 rounded-md m-6 mt-0 mb-4">
                     <LoadingSpinner />
                     <span className="ml-2 text-muted-foreground">Solving...</span>
                  </div>
             )}
-            <div className="bg-secondary/30 p-4 rounded-md min-h-[150px] flex items-center justify-center">
+            {/* Solution display area takes available space */}
+            <div className="bg-secondary/30 p-4 rounded-md flex-grow flex items-center justify-center overflow-auto">
               {solution ? (
-                <pre className="text-lg font-semibold whitespace-pre-wrap text-center">{solution}</pre>
+                <pre className="text-sm font-medium whitespace-pre-wrap text-left w-full">{solution}</pre>
               ) : (
                 <p className="text-muted-foreground text-center">
                   {isLoadingSolution ? 'Calculating...' : 'Solution will appear here.'}
                 </p>
               )}
             </div>
+            {/* Clear button at the bottom */}
             <Button
                 variant="outline"
                 onClick={handleClearAll}
