@@ -1,4 +1,5 @@
 
+
 "use client";
 
 import React, { useState, useCallback } from 'react';
@@ -16,11 +17,11 @@ import { Button } from '@/components/ui/button';
 import { ImageUploader } from '@/components/image-uploader';
 import { LoadingSpinner } from '@/components/loading-spinner';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Eraser, BrainCircuit, Image as ImageIcon, CheckCircle, HelpCircle, AlertCircle } from 'lucide-react';
+import { Eraser, BrainCircuit, Image as ImageIcon, CheckCircle, HelpCircle, AlertCircle, Info } from 'lucide-react'; // Added Info icon
 import { useToast } from "@/hooks/use-toast";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Progress } from '@/components/ui/progress'; // Import Progress
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog"; // Import AlertDialog components
+import { Progress } from '@/components/ui/progress';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 
 
 // Constants for specific messages from AI flows used in UI logic
@@ -44,8 +45,16 @@ const BYPASS_ALL_PROCESSING_MESSAGES = [
     OCR_BLOCKED_BY_SAFETY_MARKER,
 ];
 
-// OCR Confidence Simulation
-const MOCK_CONFIDENCE = 0.85; // Example confidence score (replace with actual if available)
+// Define the type for confidence levels
+type ConfidenceLevel = 'high' | 'medium' | 'low' | null;
+
+// Function to get confidence level and icon
+const getConfidenceDetails = (score: number | null): { level: ConfidenceLevel; icon: React.ReactNode; text: string } => {
+    if (score === null) return { level: null, icon: null, text: '' };
+    if (score > 0.85) return { level: 'high', icon: <CheckCircle className="w-3 h-3 text-green-500" />, text: `High Confidence (${(score * 100).toFixed(0)}%)` };
+    if (score > 0.6) return { level: 'medium', icon: <HelpCircle className="w-3 h-3 text-yellow-500" />, text: `Medium Confidence (${(score * 100).toFixed(0)}%)` };
+    return { level: 'low', icon: <AlertCircle className="w-3 h-3 text-red-500" />, text: `Low Confidence (${(score * 100).toFixed(0)}%) - Review recommended` };
+};
 
 export function MathSolver() {
   const [imageUrl, setImageUrl] = useState<string | null>(null);
@@ -60,28 +69,31 @@ export function MathSolver() {
   const [isLoadingSolution, setIsLoadingSolution] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [file, setFile] = useState<File | null>(null);
-  const [ocrConfidence, setOcrConfidence] = useState<number | null>(null); // State for confidence
+  const [ocrConfidence, setOcrConfidence] = useState<number | null>(null); // State for confidence (0-1)
   const [progress, setProgress] = useState<number>(0); // State for progress bar
 
   const { toast } = useToast();
 
   const isProcessing = isLoadingOcr || isLoadingCorrection || isLoadingSolution;
 
-  // Simulate progress updates during OCR
+  // Simulate progress updates
   const simulateProgress = (duration: number) => {
     let startTime = Date.now();
+    setProgress(10); // Start immediately
     const interval = setInterval(() => {
       const elapsedTime = Date.now() - startTime;
-      const calculatedProgress = Math.min(100, (elapsedTime / duration) * 100);
+      const calculatedProgress = Math.min(95, 10 + (elapsedTime / duration) * 85); // Simulate up to 95%
       setProgress(calculatedProgress);
-      if (calculatedProgress >= 100) {
+      if (calculatedProgress >= 95) {
         clearInterval(interval);
-        // Optional: set progress back to 0 after a short delay or on completion
-        // setTimeout(() => setProgress(0), 500);
       }
-    }, 100); // Update every 100ms
+    }, 150); // Update slightly more frequently
 
-    return () => clearInterval(interval); // Cleanup function
+    return () => {
+        clearInterval(interval);
+        setProgress(100); // Ensure it hits 100 on cleanup
+        setTimeout(() => setProgress(0), 500); // Reset after completion
+    };
   };
 
   // --- Flow Trigger Functions ---
@@ -99,18 +111,18 @@ export function MathSolver() {
     setProgress(0); // Reset progress
 
     console.log("Calling extractMathText flow...");
-    const cleanupProgress = simulateProgress(2000); // Simulate 2-second OCR
+    const cleanupProgress = simulateProgress(2500); // Simulate 2.5-second OCR/Preprocessing
 
     try {
       const ocrResult = await extractMathText({ imageDataUri });
       console.log("OCR Result Received:", ocrResult);
-      setProgress(100); // Ensure progress reaches 100 on completion
+
 
        if (ocrResult?.preprocessedImageUri) {
           setPreprocessedImageUrl(ocrResult.preprocessedImageUri);
           console.log("Preprocessed image URI received.");
       } else {
-          console.log("No preprocessed image URI received, using original.");
+          console.warn("No preprocessed image URI received, using original.");
           setPreprocessedImageUrl(imageDataUri); // Use original if none provided
       }
 
@@ -121,21 +133,25 @@ export function MathSolver() {
         toast({ title: "OCR Error", description: "Invalid response from OCR service.", variant: "destructive" });
       } else {
         const fullText = ocrResult.fullText;
-        const expression = ocrResult.extractedExpression || null; // Ensure null if empty/undefined
+        // Ensure expression is null if it's empty string, null, or undefined
+        const expression = (typeof ocrResult.extractedExpression === 'string' && ocrResult.extractedExpression.trim() !== '')
+          ? ocrResult.extractedExpression.trim()
+          : null;
         setOcrFullText(fullText);
         setOcrExpression(expression);
-        setOcrConfidence(MOCK_CONFIDENCE); // Set mock confidence
+        // Set mock confidence based on whether text was found
+        setOcrConfidence(fullText === NO_TEXT_FOUND_MESSAGE ? 0.1 : 0.85); // Example: Low if no text, high otherwise
 
         if (fullText === NO_TEXT_FOUND_MESSAGE) {
-          toast({ title: "OCR Result", description: "No readable text found in the image.", variant: "default" });
-          setCorrectedFullText('');
+          toast({ title: "OCR Result", description: "No readable text found in the image.", variant: "default", icon: <Info className="h-5 w-5 text-blue-500" /> });
+          setCorrectedFullText(''); // Explicitly clear corrected text
           setCorrectedExpression(null);
         } else if (BYPASS_ALL_PROCESSING_MESSAGES.includes(fullText)) {
            const displayError = fullText.startsWith("API_") ? "API Error" :
                                 fullText.startsWith("PREPROCESSING") ? "Preprocessing Error" :
-                                fullText === OCR_BLOCKED_BY_SAFETY_MARKER ? "Blocked by Safety" :
+                                fullText === OCR_BLOCKED_BY_SAFETY_MARKER ? "Blocked by Safety Filters" :
                                 "OCR Processing Error";
-           setError(`OCR failed: ${displayError}. Check image, API key, or try again.`);
+           setError(`OCR failed: ${displayError}. Details: ${fullText}. Check image, setup, or try again.`);
            toast({ title: "OCR Error", description: `Text extraction failed: ${displayError}`, variant: "destructive" });
            setCorrectedFullText('');
            setCorrectedExpression(null);
@@ -143,23 +159,22 @@ export function MathSolver() {
           // Valid text found, set corrected state initially to raw OCR output
           setCorrectedFullText(fullText);
           setCorrectedExpression(expression);
-          toast({ title: "Text Extracted", description: expression ? "Found text and a math expression." : "Found text." });
-          // Correction is now triggered by button click
+          toast({ title: "Text Extracted", description: expression ? "Found text and a math expression." : "Found text, no distinct math expression isolated.", icon: <CheckCircle className="h-5 w-5 text-green-500" /> });
+          // Correction is now triggered by button click or implicitly before solve
         }
       }
     } catch (err) {
       console.error("Error calling OCR processing flow:", err);
       const errorMsg = err instanceof Error ? err.message : "Unknown error.";
       setError(`OCR Process Error: Failed to communicate with AI (${errorMsg}).`);
-      setOcrFullText(OCR_PROCESSING_ERROR_MESSAGE);
+      setOcrFullText(OCR_PROCESSING_ERROR_MESSAGE); // Set status even on comms error
       setCorrectedFullText('');
       setCorrectedExpression(null);
       toast({ title: "OCR Call Failed", description: "Could not reach text extraction service.", variant: "destructive" });
     } finally {
-      cleanupProgress(); // Clear the interval
+      cleanupProgress(); // Clear the interval and finalize progress
       setIsLoadingOcr(false);
       console.log("Finished OCR attempt.");
-      setTimeout(() => setProgress(0), 500); // Reset progress bar after a short delay
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [toast]); // Keep dependencies minimal
@@ -169,14 +184,19 @@ export function MathSolver() {
     const textToCorrect = correctedFullText;
     const expressionToCorrect = correctedExpression;
 
-    if (!textToCorrect || BYPASS_ALL_PROCESSING_MESSAGES.includes(ocrFullText)) { // Check original OCR status
-      console.warn("Skipping AI correction due to initial OCR status:", ocrFullText);
-      toast({ title: "Correction Skipped", description: "Cannot run AI correction due to initial OCR error or no text.", variant: "destructive"});
-      return;
+    // Allow correction even if original OCR had errors, using the potentially edited text
+    if (!textToCorrect) {
+        toast({ title: "Correction Skipped", description: "No text available to correct.", variant: "destructive"});
+        return;
+    }
+    // Check if the *original* OCR result was an error that should bypass processing
+    if (BYPASS_ALL_PROCESSING_MESSAGES.includes(ocrFullText)) {
+      console.warn("Attempting correction despite initial OCR status being an error:", ocrFullText);
+      toast({ title: "Correction Warning", description: `Attempting AI correction, but initial OCR had status: ${ocrFullText}. Results might be unreliable.`, variant: "default"});
     }
 
     setIsLoadingCorrection(true);
-    setError(null);
+    setError(null); // Clear previous errors
     setSolution(''); // Clear solution when recorrecting
     console.log("Calling fixOcrErrors flow for AI correction...");
 
@@ -189,12 +209,18 @@ export function MathSolver() {
         // Don't revert, keep user edits if AI fails
         toast({ title: "Correction Error", description: "Invalid response from AI correction service.", variant: "destructive" });
       } else {
+        // Ensure expression is null if empty string returned
+         const correctedExpr = (typeof result.correctedExpression === 'string' && result.correctedExpression.trim() !== '')
+            ? result.correctedExpression.trim()
+            : null;
+
         setCorrectedFullText(result.correctedText);
-        setCorrectedExpression(result.correctedExpression || null);
-        const changesMade = result.correctedText !== textToCorrect || result.correctedExpression !== expressionToCorrect;
+        setCorrectedExpression(correctedExpr);
+        const changesMade = result.correctedText !== textToCorrect || correctedExpr !== expressionToCorrect;
         toast({
           title: "AI Correction Applied",
           description: changesMade ? "AI has updated the text/expression." : "AI reviewed, no changes suggested.",
+          icon: changesMade ? <BrainCircuit className="h-5 w-5 text-primary" /> : <Info className="h-5 w-5 text-blue-500" />,
         });
       }
     } catch (err) {
@@ -208,36 +234,46 @@ export function MathSolver() {
       console.log("Finished AI correction attempt.");
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [correctedFullText, correctedExpression, ocrFullText, toast]); // Add ocrFullText dependency
+  }, [correctedFullText, correctedExpression, ocrFullText, toast]); // Ensure ocrFullText is dependency for bypass check
 
   const handleSolve = useCallback(async () => {
     const context = correctedFullText?.trim();
     const expression = correctedExpression?.trim() || null;
 
-    if (!context || BYPASS_ALL_PROCESSING_MESSAGES.includes(ocrFullText)) { // Check original OCR status
-       const reason = !context ? "is empty" : "indicates an error occurred earlier";
-       const userMessage = `Cannot solve because the text context ${reason}. Please upload/edit first.`;
+    // Check if the *original* OCR result was an error that should bypass solving
+    if (BYPASS_ALL_PROCESSING_MESSAGES.includes(ocrFullText)) {
+       const userMessage = `Cannot solve because the initial text extraction failed (${ocrFullText}). Please upload a clearer image or correct the text manually.`;
+       setSolution(`${MATH_AI_ERROR_PREFIX} ${userMessage}`);
+       toast({ title: "Cannot Solve", description: userMessage, variant: "destructive" });
+       return; // Stop if initial OCR failed critically
+    }
+
+    // Check if there's actually text to solve after potential edits
+    if (!context || context.trim() === '') {
+       const userMessage = `Cannot solve because the text context is empty. Please upload an image or enter text.`;
        setSolution(`${MATH_AI_ERROR_PREFIX} ${userMessage}`);
        toast({ title: "Invalid Input for Solver", description: userMessage, variant: "destructive" });
-       setIsLoadingSolution(false);
-       return;
+       return; // Stop if no text
     }
+
 
     setIsLoadingSolution(true);
     setError(null);
     setSolution('');
     console.log("Calling solveMathExpression flow...");
-    const cleanupProgress = simulateProgress(3000); // Simulate 3-second solving
+    const cleanupProgress = simulateProgress(3500); // Simulate 3.5-second solving
 
     try {
+       // Optional: Implicitly run correction if not done manually?
+      // Or rely on user to click 'Correct' or just edit. Let's rely on user edits for now.
+
       const result = await solveMathExpression({ fullTextContext: context, expression: expression });
       console.log("Solver Result (Markdown):", result);
-      setProgress(100); // Ensure progress reaches 100
 
       if (!result || typeof result.solution !== 'string') {
         console.error("Received invalid or null response from solver service.");
         const solutionErrorMsg = `${MATH_AI_ERROR_PREFIX} Solver error (invalid response).`;
-        setError("Solver Error: Invalid response from service.");
+        setError("Solver Error: Invalid response from service."); // Keep generic error state
         setSolution(solutionErrorMsg);
         toast({ title: "Solving Error", description: "Invalid response from solver service.", variant: "destructive" });
       } else {
@@ -246,26 +282,26 @@ export function MathSolver() {
         const isConclusion = result.solution.startsWith(MATH_AI_CONCLUSION_PREFIX);
         toast({
           title: isErrorSolution ? "Solver Issue" : isConclusion ? "Solver Conclusion" : "Solution Generated",
-          description: isErrorSolution ? "The solver reported an issue." : isConclusion ? "The solver reached a conclusion." : "Successfully generated solution.",
+          description: isErrorSolution ? "The solver reported an issue." : isConclusion ? "The solver reached a conclusion." : "Successfully generated step-by-step solution.",
           variant: isErrorSolution ? "destructive" : "default",
+          icon: isErrorSolution ? <AlertCircle className="h-5 w-5 text-red-400" /> : <CheckCircle className="h-5 w-5 text-green-500" />,
         });
       }
     } catch (err) {
       console.error("Error during solving process:", err);
       const errorMsg = err instanceof Error ? err.message : "Unknown error.";
       const displayError = `Solver Process Error: Failed to communicate with AI (${errorMsg}).`;
-      const solutionErrorMsg = `${MATH_AI_ERROR_PREFIX} Unexpected error: Failed to reach AI service.`;
+      const solutionErrorMsg = `${MATH_AI_ERROR_PREFIX} Unexpected error: Failed to reach AI solving service.`;
       setError(displayError);
       setSolution(solutionErrorMsg);
       toast({ title: "Solving Call Failed", description: "Could not reach solving service.", variant: "destructive" });
     } finally {
-      cleanupProgress(); // Clear interval
+      cleanupProgress(); // Clear interval and finalize progress
       setIsLoadingSolution(false);
       console.log("Finished solving attempt.");
-      setTimeout(() => setProgress(0), 500); // Reset progress bar after delay
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [correctedFullText, correctedExpression, ocrFullText, toast]); // Add ocrFullText dependency
+  }, [correctedFullText, correctedExpression, ocrFullText, toast]); // Add ocrFullText dependency for bypass check
 
   // --- Event Handlers ---
 
@@ -276,7 +312,7 @@ export function MathSolver() {
     const tempImageUrl = URL.createObjectURL(uploadedFile);
     setImageUrl(tempImageUrl); // Show preview immediately
 
-    // Clear previous results
+    // Clear previous results thoroughly
     setError(null);
     setOcrFullText('');
     setOcrExpression(null);
@@ -321,16 +357,19 @@ export function MathSolver() {
     if (name === 'correctedFullText') {
       setCorrectedFullText(value);
     } else if (name === 'correctedExpression') {
-      setCorrectedExpression(value || null); // Set to null if empty
+      // Ensure it becomes null if the input is cleared, not just an empty string
+      setCorrectedExpression(value.trim() === '' ? null : value);
     }
     // Clear downstream solution/error on user edit
     if (solution) setSolution('');
+    // Clear only specific errors (like solving errors) when user edits, keep OCR errors
     if (error && (error.toLowerCase().includes('solver') || error.toLowerCase().includes('solving'))) {
-        setError(null); // Clear only solver-related errors on edit
+        setError(null);
     }
   };
 
   const performClearAll = () => {
+    // Revoke object URLs if they exist
     if (imageUrl && imageUrl.startsWith('blob:')) {
       URL.revokeObjectURL(imageUrl);
     }
@@ -352,7 +391,7 @@ export function MathSolver() {
     setIsLoadingCorrection(false);
     setIsLoadingSolution(false);
     console.log("Cleared all fields.");
-    toast({ title: "Cleared", description: "All fields reset." });
+    toast({ title: "Cleared", description: "All fields reset.", icon: <Eraser className="h-5 w-5 text-muted-foreground" /> });
   };
 
 
@@ -360,27 +399,39 @@ export function MathSolver() {
 
   const rawOcrDisplayFullText = isLoadingOcr ? "Extracting text..." :
                            ocrFullText === NO_TEXT_FOUND_MESSAGE ? "No readable text found." :
-                           BYPASS_ALL_PROCESSING_MESSAGES.includes(ocrFullText) ? `OCR failed: ${ocrFullText}` :
-                           ocrFullText ? ocrFullText : "Upload an image to start.";
+                           BYPASS_ALL_PROCESSING_MESSAGES.includes(ocrFullText) ? `OCR Error: ${ocrFullText}` :
+                           ocrFullText ? ocrFullText : "Upload or capture an image to start.";
 
   const rawOcrDisplayExpression = isLoadingOcr ? "Extracting..." :
                                   !ocrFullText || BYPASS_ALL_PROCESSING_MESSAGES.includes(ocrFullText) ? "N/A" :
                                   ocrExpression ? ocrExpression : "(No distinct expression found)";
 
-  const correctedTextPlaceholder = isLoadingCorrection ? "AI correcting..." :
-                                  ocrFullText && !BYPASS_ALL_PROCESSING_MESSAGES.includes(ocrFullText) ? "Edit full text if needed..." :
-                                  ocrFullText === NO_TEXT_FOUND_MESSAGE ? "No text found to correct or edit." :
-                                  BYPASS_ALL_PROCESSING_MESSAGES.includes(ocrFullText) ? "Cannot edit due to OCR error." :
-                                  "Upload image first...";
+  // Placeholder logic needs to consider the OCR state
+  const getPlaceholder = (type: 'text' | 'expression'): string => {
+      if (isLoadingCorrection) return "AI correcting...";
+      if (isLoadingOcr) return "Waiting for OCR..."; // Added state for when OCR is running
 
-  const correctedExpressionPlaceholder = isLoadingCorrection ? "AI correcting..." :
-                                  ocrFullText && !BYPASS_ALL_PROCESSING_MESSAGES.includes(ocrFullText) ? "Edit expression if needed..." :
-                                  ocrFullText === NO_TEXT_FOUND_MESSAGE ? "No expression found." :
-                                  BYPASS_ALL_PROCESSING_MESSAGES.includes(ocrFullText) ? "N/A" :
-                                  "Expression (if any) appears here...";
+      if (!ocrFullText) return "Upload or capture image first.";
+      if (BYPASS_ALL_PROCESSING_MESSAGES.includes(ocrFullText)) return "Cannot edit due to OCR error.";
+      if (ocrFullText === NO_TEXT_FOUND_MESSAGE) {
+          return type === 'text' ? "No text found to edit." : "No expression found.";
+      }
 
-  const canSolve = correctedFullText && correctedFullText.trim() !== '' && !BYPASS_ALL_PROCESSING_MESSAGES.includes(ocrFullText);
-  const canCorrect = correctedFullText && correctedFullText.trim() !== '' && !BYPASS_ALL_PROCESSING_MESSAGES.includes(ocrFullText);
+      // If we have valid OCR text
+      return type === 'text' ? "Edit full text if needed..." : "Edit expression if needed, or leave blank if none...";
+  };
+
+  const correctedTextPlaceholder = getPlaceholder('text');
+  const correctedExpressionPlaceholder = getPlaceholder('expression');
+
+  // Enable correction/solving only if we have non-error OCR text
+  const hasValidOcrText = ocrFullText && !BYPASS_ALL_PROCESSING_MESSAGES.includes(ocrFullText) && ocrFullText !== NO_TEXT_FOUND_MESSAGE;
+  // Enable solving only if the *editable* text is not empty
+  const canSolve = correctedFullText && correctedFullText.trim() !== '' && hasValidOcrText;
+  // Enable correction if we have valid OCR text (even if editable fields are empty initially)
+  const canCorrect = hasValidOcrText;
+
+  const confidenceDetails = getConfidenceDetails(ocrConfidence);
 
   // --- JSX ---
   return (
@@ -388,26 +439,26 @@ export function MathSolver() {
 
       {error && (
         <Alert variant="destructive" className="mb-6 shadow-lg rounded-xl border-destructive/60 bg-destructive/10">
-          <AlertCircle className="h-5 w-5" /> {/* Icon */}
+          <AlertCircle className="h-5 w-5 text-destructive" /> {/* Ensure icon color matches variant */}
           <AlertTitle className="font-semibold text-base">Error Encountered</AlertTitle>
           <AlertDescription className="text-sm">{error}</AlertDescription>
         </Alert>
       )}
 
-      {(isLoadingOcr || isLoadingCorrection || isLoadingSolution) && (
-         <Progress value={progress} className="w-full h-1 mb-6 rounded-full bg-primary/20 [&>*]:bg-primary" />
+      {(isProcessing) && (
+         <Progress value={progress} className="w-full h-1 mb-6 rounded-full bg-primary/20 [&>*]:bg-primary transition-all duration-150" />
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 lg:gap-8">
 
         {/* --- Left Panel: Upload & Preview --- */}
-        <Card className="shadow-lg rounded-2xl border border-border/50 bg-card flex flex-col h-full overflow-hidden transition-shadow hover:shadow-xl">
+        <Card className="shadow-xl rounded-2xl border border-border/50 bg-card flex flex-col h-full overflow-hidden transition-shadow hover:shadow-2xl">
           <CardHeader className="border-b border-border/50 pb-4">
             <CardTitle className="text-lg font-semibold flex items-center gap-2 text-foreground">
               <ImageIcon className="w-5 h-5 text-primary" />
-              1. Upload Image
+              1. Upload or Capture
             </CardTitle>
-            <CardDescription className="text-sm text-muted-foreground">Drop or select a clear image of your math problem.</CardDescription>
+            <CardDescription className="text-sm text-muted-foreground">Use a clear image of your math problem.</CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col flex-grow p-4 md:p-6 items-center justify-center">
             <ImageUploader
@@ -415,10 +466,11 @@ export function MathSolver() {
               imageUrl={imageUrl}
               setImageUrl={setImageUrl}
               setFile={setFile}
-              className="flex-grow w-full mb-4 min-h-[200px] md:min-h-[250px] transition-all duration-300 ease-in-out hover:shadow-inner rounded-xl" // Increased radius
+              className="flex-grow w-full mb-4 min-h-[250px] md:min-h-[300px] transition-all duration-300 ease-in-out rounded-xl" // Adjusted height
             />
-            {isLoadingOcr && progress < 100 && (
-              <div className="mt-auto flex items-center justify-center text-muted-foreground p-2 text-sm">
+             {/* Loading indicator inside the uploader area (optional) */}
+             {isLoadingOcr && progress < 100 && (
+              <div className="mt-auto flex items-center justify-center text-muted-foreground p-2 text-sm w-full">
                 <LoadingSpinner size={16} className="mr-2 text-primary" />
                 <span>Processing Image ({Math.round(progress)}%)...</span>
               </div>
@@ -427,8 +479,8 @@ export function MathSolver() {
         </Card>
 
         {/* --- Middle Panel: Verify & Edit --- */}
-        <Card className="shadow-lg rounded-2xl border border-border/50 bg-card flex flex-col h-full relative overflow-hidden transition-shadow hover:shadow-xl">
-          {(isLoadingCorrection) && ( // Only show overlay for correction now
+        <Card className="shadow-xl rounded-2xl border border-border/50 bg-card flex flex-col h-full relative overflow-hidden transition-shadow hover:shadow-2xl">
+          {(isLoadingCorrection) && ( // Overlay for correction
              <div className="absolute inset-0 bg-background/80 flex flex-col items-center justify-center z-20 rounded-2xl p-4 text-center backdrop-blur-sm">
                <LoadingSpinner className="text-primary h-6 w-6" />
                <span className="mt-2 text-muted-foreground text-sm">
@@ -438,10 +490,11 @@ export function MathSolver() {
           )}
           <CardHeader className="border-b border-border/50 pb-4">
             <CardTitle className="text-lg font-semibold text-foreground">2. Verify & Edit Text</CardTitle>
-            <CardDescription className="text-sm text-muted-foreground">Review the extracted text. Edit if needed before solving.</CardDescription>
+            <CardDescription className="text-sm text-muted-foreground">Review extracted text. Edit if needed before solving.</CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col flex-grow p-4 md:p-6 space-y-4">
-            <ScrollArea className="flex-grow -mx-4 px-4"> {/* Full height scroll */}
+             {/* ScrollArea now wraps the entire editable section */}
+            <ScrollArea className="flex-grow -mx-4 px-4 h-0 min-h-[300px]"> {/* Ensure ScrollArea takes available space */}
               <div className="space-y-4">
                  {/* Raw OCR Full Text Output */}
                  <div className="relative group">
@@ -450,17 +503,15 @@ export function MathSolver() {
                         id="ocrFullText"
                         value={rawOcrDisplayFullText}
                         readOnly
-                        placeholder="Raw text from image..."
-                        className="min-h-[60px] bg-muted/30 border-border/50 text-muted-foreground resize-none text-sm rounded-lg shadow-inner" // Increased radius
+                        placeholder="Raw text appears here..."
+                        className="min-h-[60px] bg-muted/30 border-border/50 text-muted-foreground resize-none text-sm rounded-lg shadow-inner"
                         aria-label="Raw OCR Full Text Output (Readonly)"
                      />
-                      {/* Confidence Score */}
-                     {ocrConfidence !== null && !isLoadingOcr && !BYPASS_ALL_PROCESSING_MESSAGES.includes(ocrFullText) && ocrFullText !== NO_TEXT_FOUND_MESSAGE && (
-                       <div className="absolute bottom-1 right-2 text-xs text-muted-foreground bg-background/70 px-1.5 py-0.5 rounded-md flex items-center gap-1">
-                         {ocrConfidence > 0.8 ? <CheckCircle className="w-3 h-3 text-green-500" /> :
-                          ocrConfidence > 0.5 ? <HelpCircle className="w-3 h-3 text-yellow-500" /> :
-                          <AlertCircle className="w-3 h-3 text-red-500" />}
-                         <span>Conf: {(ocrConfidence * 100).toFixed(0)}%</span>
+                     {/* Confidence Score Display */}
+                     {confidenceDetails.level && !isLoadingOcr && (
+                       <div title={confidenceDetails.text} className="absolute bottom-1.5 right-2 text-xs text-muted-foreground bg-background/70 px-1.5 py-0.5 rounded-md flex items-center gap-1 cursor-help">
+                         {confidenceDetails.icon}
+                         <span>{(ocrConfidence! * 100).toFixed(0)}%</span>
                        </div>
                      )}
                  </div>
@@ -472,35 +523,37 @@ export function MathSolver() {
                         id="ocrExpression"
                         value={rawOcrDisplayExpression}
                         readOnly
-                        placeholder="Expression..."
-                        className="bg-muted/30 border-border/50 text-muted-foreground text-sm rounded-lg shadow-inner" // Increased radius
+                        placeholder="Isolated expression..."
+                        className="bg-muted/30 border-border/50 text-muted-foreground text-sm rounded-lg shadow-inner"
                         aria-label="Raw OCR Isolated Expression (Readonly)"
                      />
                  </div>
 
-                 {/* Preprocessed Image Preview */}
-                 <div>
-                    <label className="text-xs font-medium text-muted-foreground block mb-1">Preprocessed Image Preview</label>
-                    <div className="border border-border/50 rounded-lg p-2 bg-muted/20 min-h-[80px] flex items-center justify-center shadow-inner"> {/* Increased radius */}
-                        {preprocessedImageUrl ? (
-                            <Image
-                                src={preprocessedImageUrl}
-                                alt="Preprocessed Math Problem"
-                                width={250}
-                                height={125}
-                                className="max-h-[100px] w-auto object-contain rounded-sm"
-                                data-ai-hint="preprocessed math text"
-                            />
-                        ) : (
-                            <span className="text-xs text-muted-foreground text-center px-4">
-                                {isLoadingOcr ? 'Generating preview...' : imageUrl ? 'Preview appears here.' : 'Upload image first.'}
-                            </span>
-                        )}
-                    </div>
-                 </div>
+                  {/* Preprocessed Image Preview */}
+                  <div className="pt-2">
+                      <label className="text-xs font-medium text-muted-foreground block mb-1">Preprocessed Image Preview (used for OCR)</label>
+                      <div className="border border-border/50 rounded-lg p-2 bg-muted/20 min-h-[80px] flex items-center justify-center shadow-inner">
+                          {preprocessedImageUrl ? (
+                              <Image
+                                  src={preprocessedImageUrl}
+                                  alt="Preprocessed Math Problem"
+                                  width={250}
+                                  height={125}
+                                  className="max-h-[100px] w-auto object-contain rounded-sm"
+                                  data-ai-hint="preprocessed math text"
+                                  // Use key to force re-render if URI changes
+                                  key={preprocessedImageUrl}
+                              />
+                          ) : (
+                              <span className="text-xs text-muted-foreground text-center px-4">
+                                  {isLoadingOcr ? 'Generating preview...' : imageUrl ? 'Preview appears after processing.' : 'Upload or capture first.'}
+                              </span>
+                          )}
+                      </div>
+                  </div>
 
                  {/* Corrected/Editable Full Text */}
-                 <div className="relative group">
+                 <div className="relative group pt-2">
                      <label htmlFor="correctedFullText" className="text-xs font-medium text-foreground block mb-1">Parsed Text (Editable)</label>
                      <Textarea
                         id="correctedFullText"
@@ -508,9 +561,9 @@ export function MathSolver() {
                         value={correctedFullText}
                         onChange={handleTextChange}
                         placeholder={correctedTextPlaceholder}
-                        className="min-h-[80px] focus:ring-primary focus:border-primary resize-y text-sm rounded-lg shadow-sm transition-shadow focus:shadow-md" // Increased radius
+                        className="min-h-[100px] focus:ring-primary focus:border-primary resize-y text-sm rounded-lg shadow-sm transition-shadow focus:shadow-md"
                         aria-label="Parsed Full Text (Editable)"
-                        disabled={isProcessing || !ocrFullText || BYPASS_ALL_PROCESSING_MESSAGES.includes(ocrFullText)}
+                        disabled={isProcessing || !hasValidOcrText} // Disable if processing or OCR failed/no text
                      />
                  </div>
 
@@ -523,21 +576,22 @@ export function MathSolver() {
                         value={correctedExpression ?? ''} // Use ?? '' for controlled input
                         onChange={handleTextChange}
                         placeholder={correctedExpressionPlaceholder}
-                        className="focus:ring-primary focus:border-primary text-sm rounded-lg shadow-sm transition-shadow focus:shadow-md" // Increased radius
+                        className="focus:ring-primary focus:border-primary text-sm rounded-lg shadow-sm transition-shadow focus:shadow-md"
                         aria-label="Parsed Expression (Editable)"
-                        disabled={isProcessing || !ocrFullText || BYPASS_ALL_PROCESSING_MESSAGES.includes(ocrFullText)}
+                         disabled={isProcessing || !hasValidOcrText} // Disable if processing or OCR failed/no text
                      />
                  </div>
               </div>
             </ScrollArea>
 
-            <div className="mt-auto pt-4 space-y-3 border-t border-border/50"> {/* Buttons area */}
+             {/* Buttons section pushed to the bottom */}
+            <div className="mt-auto pt-4 space-y-3 border-t border-border/50">
                  <Button
-                    variant="ghost" // Subtle variant
+                    variant="ghost" // Subtle ghost button for AI correction
                     size="sm"
                     onClick={handleAiCorrection}
-                    disabled={!canCorrect || isProcessing}
-                    className="w-full text-xs text-primary hover:bg-primary/10 hover:text-primary rounded-lg" // Increased radius
+                    disabled={!canCorrect || isProcessing} // Disable based on valid OCR text
+                    className="w-full text-xs text-primary hover:bg-primary/10 hover:text-primary rounded-lg"
                     aria-label="Attempt to automatically correct OCR errors using AI"
                  >
                     {isLoadingCorrection ? <LoadingSpinner size={14} className="mr-1" /> : <BrainCircuit className="mr-1 h-3.5 w-3.5" />}
@@ -545,11 +599,11 @@ export function MathSolver() {
                  </Button>
                  <Button
                     onClick={handleSolve}
-                    disabled={!canSolve || isProcessing}
-                    className="w-full font-semibold bg-primary text-primary-foreground hover:bg-primary/90 rounded-lg shadow-sm hover:shadow-md transition-all" // Primary button, increased radius
+                    disabled={!canSolve || isProcessing} // Disable based on editable text & valid OCR
+                    className="w-full font-semibold bg-primary text-primary-foreground hover:bg-primary/90 rounded-lg shadow-sm hover:shadow-md transition-all"
                     aria-label="Solve the problem based on the parsed text"
                 >
-                    {isLoadingSolution ? <LoadingSpinner className="mr-2" /> : <CheckCircle className="mr-2 h-4 w-4" />} {/* Use CheckCircle */}
+                    {isLoadingSolution ? <LoadingSpinner className="mr-2" /> : <CheckCircle className="mr-2 h-4 w-4" />}
                     Solve Problem
                 </Button>
             </div>
@@ -557,8 +611,8 @@ export function MathSolver() {
         </Card>
 
         {/* --- Right Panel: Solution --- */}
-        <Card className="shadow-lg rounded-2xl border border-border/50 bg-card flex flex-col h-full relative overflow-hidden transition-shadow hover:shadow-xl">
-           {isLoadingSolution && progress < 100 && ( // Show overlay only while loading solution
+        <Card className="shadow-xl rounded-2xl border border-border/50 bg-card flex flex-col h-full relative overflow-hidden transition-shadow hover:shadow-2xl">
+           {isLoadingSolution && progress < 100 && ( // Overlay only for solution loading
                <div className="absolute inset-0 bg-background/80 flex flex-col items-center justify-center z-20 rounded-2xl p-4 text-center backdrop-blur-sm">
                   <LoadingSpinner className="text-primary h-6 w-6" />
                   <span className="mt-2 text-muted-foreground text-sm">Generating Solution ({Math.round(progress)}%)...</span>
@@ -569,8 +623,9 @@ export function MathSolver() {
             <CardDescription className="text-sm text-muted-foreground">The step-by-step solution appears here.</CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col flex-grow p-4 md:p-6">
-            <ScrollArea className="flex-grow border border-border/40 bg-muted/20 p-4 rounded-xl mb-4 min-h-[250px] shadow-inner"> {/* Increased radius, lighter background */}
-                <div className="prose prose-sm max-w-none text-foreground dark:prose-invert prose-p:my-1.5 prose-headings:my-2 prose-ul:my-1 prose-li:my-0.5 prose-strong:text-primary prose-code:before:content-none prose-code:after:content-none prose-code:bg-muted/50 prose-code:px-1 prose-code:py-0.5 prose-code:rounded-md prose-code:font-normal"> {/* Adjusted prose styles */}
+             {/* ScrollArea wraps the solution display */}
+            <ScrollArea className="flex-grow border border-border/40 bg-muted/20 p-4 rounded-xl mb-4 min-h-[300px] shadow-inner h-0">
+                <div className="prose prose-sm max-w-none text-foreground dark:prose-invert prose-p:my-1.5 prose-headings:my-2 prose-ul:my-1 prose-li:my-0.5 prose-strong:text-primary prose-code:before:content-none prose-code:after:content-none prose-code:bg-muted/50 prose-code:px-1 prose-code:py-0.5 prose-code:rounded-md prose-code:font-normal">
                    {solution ? (
                      <ReactMarkdown
                        remarkPlugins={[remarkMath]}
@@ -581,9 +636,8 @@ export function MathSolver() {
                    ) : (
                        <div className="flex items-center justify-center h-full text-center text-muted-foreground text-sm px-4">
                            {isProcessing && !isLoadingSolution ? 'Processing previous steps...' :
-                            !imageUrl ? 'Upload an image first.' :
-                            ocrFullText === NO_TEXT_FOUND_MESSAGE ? 'No text found to solve.' :
-                            BYPASS_ALL_PROCESSING_MESSAGES.includes(ocrFullText) ? 'Cannot solve due to OCR error.' :
+                            !imageUrl ? 'Upload or capture an image first.' :
+                            !hasValidOcrText && !isLoadingOcr ? 'OCR failed. Cannot solve.' : // Specific message for OCR failure
                             !correctedFullText && !isProcessing ? 'Verify/Edit text, then click Solve.' :
                             'Solution will appear here after solving.'
                            }
@@ -596,7 +650,7 @@ export function MathSolver() {
               <AlertDialogTrigger asChild>
                  <Button
                     variant="outline"
-                    className="w-full mt-auto font-medium border-destructive/30 text-destructive hover:bg-destructive/10 hover:border-destructive/50 rounded-lg" // Destructive outline, increased radius
+                    className="w-full mt-auto font-medium border-destructive/30 text-destructive hover:bg-destructive/10 hover:border-destructive/50 rounded-lg"
                     disabled={isProcessing}
                     aria-label="Clear all fields and the uploaded image"
                  >
@@ -604,7 +658,7 @@ export function MathSolver() {
                     Clear All
                  </Button>
               </AlertDialogTrigger>
-              <AlertDialogContent className="rounded-xl"> {/* Consistent radius */}
+              <AlertDialogContent className="rounded-xl">
                 <AlertDialogHeader>
                   <AlertDialogTitle>Are you sure?</AlertDialogTitle>
                   <AlertDialogDescription>
@@ -626,3 +680,4 @@ export function MathSolver() {
     </div>
   );
 }
+
