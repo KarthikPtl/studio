@@ -1,3 +1,4 @@
+
 'use server';
 
 /**
@@ -30,7 +31,7 @@ export type ExtractMathTextInput = z.infer<typeof ExtractMathTextInputSchema>;
 
 const ExtractedTextSchema = z
     .string()
-    .describe('The mathematical text extracted from the image, focusing only on the expression itself. If NO clear mathematical expression is found, respond with the exact string "NO_TEXT_FOUND". Do not include explanations or formatting.');
+    .describe('The mathematical text extracted from the image, focusing only on the expression itself. Uses standard notation like superscripts (x², y³) and the square root symbol (√). If NO clear mathematical expression is found, respond with the exact string "NO_TEXT_FOUND". Do not include explanations or formatting.');
 
 // Include preprocessed image in output
 const ExtractMathTextOutputSchema = z.object({
@@ -47,6 +48,7 @@ const OCR_BLOCKED_BY_SAFETY_MARKER = "OCR_BLOCKED_BY_SAFETY";
 const PREPROCESSING_ERROR_MARKER = "PREPROCESSING_ERROR";
 const API_ERROR_INVALID_KEY_MARKER = "API_ERROR_INVALID_KEY";
 const API_ERROR_QUOTA_MARKER = "API_ERROR_QUOTA";
+const GENERAL_API_ERROR_MARKER = "API_GENERAL_ERROR"; // Added general API error
 
 // --- Exported Function ---
 /**
@@ -58,33 +60,33 @@ export async function extractMathText(input: ExtractMathTextInput): Promise<Extr
   // Basic data URI validation
   if (!input.imageDataUri || !input.imageDataUri.startsWith('data:image/')) {
       console.error("Invalid imageDataUri format provided to extractMathText:", input.imageDataUri?.substring(0, 50) + "...");
-      return { extractedText: OCR_PROCESSING_ERROR_MARKER };
+      return { extractedText: OCR_PROCESSING_ERROR_MARKER, preprocessedImageUri: input.imageDataUri }; // Return original URI on format error
   }
 
   // --- Image Preprocessing ---
-  let preprocessedImageDataUri: string | undefined;
+  let preprocessedImageDataUri: string | undefined = input.imageDataUri; // Default to original
   try {
     console.log("Starting image preprocessing...");
+    // Only preprocess if it's not already a known error state (though unlikely at this point)
+    // Preprocessing might throw errors
     preprocessedImageDataUri = await preprocessImageForOcr(input.imageDataUri);
-    console.log("Image preprocessing successful.");
+    console.log("Image preprocessing successful (or bypassed).");
   } catch (error) {
     console.error("Error during image preprocessing:", error);
-    // Fail if preprocessing fails critically
-    return { extractedText: PREPROCESSING_ERROR_MARKER };
+    // If preprocessing fails critically, return error BUT still pass the *original* URI
+    return { extractedText: PREPROCESSING_ERROR_MARKER, preprocessedImageUri: input.imageDataUri };
   }
 
-  if (!preprocessedImageDataUri) {
-      console.error("Preprocessed image data URI is missing after processing.");
-      return { extractedText: OCR_PROCESSING_ERROR_MARKER };
-  }
+  // Use the (potentially) preprocessed URI for the OCR call
+  const flowInput = { imageDataUri: preprocessedImageDataUri || input.imageDataUri };
 
-  // Call the Genkit flow with the preprocessed image
-  const flowResult = await extractMathTextFlow({ imageDataUri: preprocessedImageDataUri });
+  // Call the Genkit flow
+  const flowResult = await extractMathTextFlow(flowInput);
 
-  // Return the flow result along with the preprocessed image URI
+  // Return the flow result along with the URI *used* for the OCR attempt
   return {
     ...flowResult,
-    preprocessedImageUri: preprocessedImageDataUri, // Always return the (potentially modified) URI used
+    preprocessedImageUri: flowInput.imageDataUri,
   };
 }
 
@@ -107,7 +109,7 @@ IMAGE: {{media url=imageDataUri}}
 
 CRITICAL INSTRUCTIONS:
 
-1.  **EXTREME FOCUS ON MATH:** Extract *only* mathematical content: numbers, variables (x, y, z, a, b, c, n, etc.), standard function names (sin, cos, tan, log, ln, lim, sum, int), operators (+, -, *, /, ^, √, ∑, ∫, ∂, ∞, ≈, ≠, ≤, ≥, ∈, ∉, ∀, ∃, ∴, ∵), equals signs (=), parentheses/brackets (), fraction bars, decimal points, commas (only if clearly part of numbers like 1,000).
+1.  **EXTREME FOCUS ON MATH:** Extract *only* mathematical content: numbers, variables (x, y, z, a, b, c, n, etc.), standard function names (sin, cos, tan, log, ln, lim, sum, int), operators (+, -, ×, ÷, ^, √, ∑, ∫, ∂, ∞, ≈, ≠, ≤, ≥, ∈, ∉, ∀, ∃, ∴, ∵), equals signs (=), parentheses/brackets (), fraction bars, decimal points, commas (only if clearly part of numbers like 1,000).
 2.  **AGGRESSIVELY IGNORE NON-MATH:** Completely disregard *all* surrounding elements: question numbers (like "1.", "Q2:"), instructions ("Solve for x:", "Simplify:"), descriptive text, labels, names, dates, background noise, paper lines/grids, shadows, fingers, page edges, watermarks, or any other visual clutter. If multiple unrelated items are present, isolate *only* the math expression.
 3.  **HANDWRITING INTERPRETATION (Mathematical Context is KEY):**
     *   Interpret ambiguous characters based on *mathematical likelihood*:
@@ -118,21 +120,22 @@ CRITICAL INSTRUCTIONS:
         *   'Z' is likely '2'.
         *   'g', 'q' are likely '9'.
         *   't' near numbers/variables is likely '+'.
-        *   'x' could be a variable or a multiplication sign ('*'). Use '*' if explicit or clearly between numbers (e.g., 3 * 4). Prefer implicit multiplication for variables (e.g., '2x', 'ab'). If ambiguous, lean towards 'x' as a variable unless context strongly suggests multiplication. Use '√' for square roots (NOT 'sqrt').
+        *   'x' could be a variable or a multiplication sign ('×'). Use '×' if explicit or clearly between numbers (e.g., 3 × 4). Prefer implicit multiplication for variables (e.g., '2x', 'ab'). If ambiguous, lean towards 'x' as a variable unless context strongly suggests multiplication.
     *   Handle variations: Connect broken character strokes if context implies a single character. Interpret cursive or stylized writing in a mathematical context.
-4.  **PRESERVE STRUCTURE (Standard ASCII/Unicode Math):**
+4.  **PRESERVE STRUCTURE (Using Standard Math Notation):**
     *   Maintain the original mathematical structure precisely.
-    *   Fractions: Use 'numerator/denominator'. Parenthesize numerator/denominator if complex (e.g., '(x+1)/(y-2)').
-    *   Exponents: Use '^'. Use parentheses for complex bases or exponents (e.g., '(x+y)^2', 'e^(2x)').
-    *   Subscripts/Superscripts: Use '_' for subscripts (e.g., 'x_1') and '^' for superscripts (exponents).
-    *   Multiplication: Use '*' for explicit multiplication between numbers. Prefer implicit for coefficient/variable (2x) or variable/variable (xy). Use '*' if needed for clarity (e.g., between parenthesized expressions: '(x+1)*(y-2)').
-    *   Greek Letters: Use standard names (e.g., pi, alpha, beta, theta).
-    *   Integrals/Sums: Use 'int' or 'sum' with appropriate limits notation if possible (e.g., 'int(f(x) dx from a to b)', 'sum(i from 1 to n)').
-    *   Limits: Use 'lim' notation (e.g., 'lim(x->0) f(x)').
-    *   Square Roots: Use the actual symbol '√' followed by the expression, possibly in parentheses for clarity (e.g., √16, √(x^2+1)). DO NOT use 'sqrt()'.
-    *   Order of Operations: Respect PEMDAS/BODMAS implicitly through structure.
+    *   **Fractions:** Use 'numerator/denominator'. Parenthesize numerator/denominator if complex (e.g., '(x+1)/(y-2)').
+    *   **Exponents:** Use SUPERSCRIPT characters (e.g., \`x²\`, \`y³\`) whenever possible. If the exponent is complex or not a single digit/variable, use the caret \`^\` and parentheses: \`(base)^(exponent)\` (e.g., \`(x+y)²\`, \`e^(2x)\`).
+    *   **Subscripts:** Use '_' for subscripts (e.g., 'x₁').
+    *   **Multiplication:** Use '×' (times symbol) for explicit multiplication between numbers. Prefer implicit for coefficient/variable (2x) or variable/variable (xy). Use '×' if needed for clarity (e.g., between parenthesized expressions: '(x+1)×(y-2)'). Avoid '*'.
+    *   **Division:** Use '÷' (division symbol) or fraction notation (1/2). Avoid '/'.
+    *   **Greek Letters:** Use standard names (e.g., pi, alpha, beta, theta) or Unicode symbols (π, α, β, θ).
+    *   **Integrals/Sums:** Use '∫' or '∑' with appropriate limits notation if possible (e.g., '∫[a to b] f(x) dx', '∑[i=1 to n] i').
+    *   **Limits:** Use 'lim' notation (e.g., 'lim[x→0] f(x)').
+    *   **Square Roots:** ALWAYS use the actual symbol '√' followed by the expression, possibly in parentheses for clarity (e.g., √16, √(x²+1)). DO NOT use 'sqrt()'.
+    *   **Order of Operations:** Respect PEMDAS/BODMAS implicitly through structure.
 5.  **STRICT OUTPUT FORMAT:**
-    *   **Success:** If a clear mathematical expression is extracted, return *only* that expression as a single line of plain text. NO explanation, NO commentary, NO greetings, NO markdown (like \`\`\`), NO "Extracted Text:". Just the math. Example: \`2x + 3y = 7\`
+    *   **Success:** If a clear mathematical expression is extracted, return *only* that expression as a single line of plain text using the standard notation described above. NO explanation, NO commentary, NO greetings, NO markdown (like \`\`\`). Just the math. Example: \`2x + 3y = 7\` or \`x² - 4 = 0\` or \`√(a²+b²)\`.
     *   **Failure (No Math Found):** If the image is blurry, unclear, contains NO discernible mathematical content, or if you CANNOT reliably extract any math expression, return the *exact* string: \`NO_TEXT_FOUND\`
     *   **Failure (Ambiguity):** If multiple potential math expressions exist and it's ambiguous which is primary, return \`NO_TEXT_FOUND\`.
     *   **DO NOT GUESS:** If confidence is very low, return \`NO_TEXT_FOUND\`.
@@ -158,7 +161,8 @@ const extractMathTextFlow = ai.defineFlow<
     const response = await prompt(input);
 
     // Log the raw response for debugging
-    console.log("Raw Vision API Response:", JSON.stringify(response, null, 2));
+    // Avoid logging the entire image data URI in production if possible
+    console.log("Raw Vision API Response (excluding large data):", JSON.stringify({ ...response, input: { imageDataUri: '...' } }, null, 2));
 
     // --- Safety Checks and Output Processing ---
 
@@ -177,6 +181,7 @@ const extractMathTextFlow = ai.defineFlow<
     if (candidate?.finishReason && candidate.finishReason !== 'STOP' && candidate.finishReason !== 'MODEL') {
          // Log other non-standard finish reasons
          console.warn(`Model response finished with unusual reason: ${candidate.finishReason}`);
+         // Depending on the reason, might want to return an error or try to process anyway
     }
 
 
@@ -207,10 +212,11 @@ const extractMathTextFlow = ai.defineFlow<
 
     // Basic Heuristic Check: Ensure it contains *some* math-related characters.
     // This is a weak check; the prompt is the primary guard.
-    const hasMathChars = /[0-9xXyYzZaAbBcCnN+\-*/^=()\[\]{}<>_.,|√∑∫∂∞≈≠≤≥∈∉∀∃∴∵]|sin|cos|tan|log|ln|sqrt|lim|sum|int/i.test(trimmedText);
+    const hasMathChars = /[0-9xXyYzZaAbBcCnN+\-×÷^=()\[\]{}<>_.,|√∑∫∂∞≈≠≤≥∈∉∀∃∴∵πθε]|sin|cos|tan|log|ln|lim|sum|int/i.test(trimmedText);
 
-    if (!hasMathChars) {
-        console.warn(`Extracted text "${trimmedText}" seems to lack common math characters. Treating as ${NO_TEXT_FOUND_MARKER}.`);
+
+    if (!hasMathChars && trimmedText.length < 20) { // Add length check to avoid flagging long non-math text as error
+        console.warn(`Extracted text "${trimmedText}" seems short and lacks common math characters. Treating as ${NO_TEXT_FOUND_MARKER}.`);
         return { extractedText: NO_TEXT_FOUND_MARKER };
     }
 
@@ -224,16 +230,18 @@ const extractMathTextFlow = ai.defineFlow<
        const errorMsg = error instanceof Error ? error.message : String(error);
        console.error("Underlying error:", errorMsg);
 
-       // Check if the error is related to API key or permissions
+       // Check for specific API errors
        if (errorMsg.includes('API key not valid') || errorMsg.includes('permission denied')) {
            console.error("API Key or Permission Error detected.");
-           return { extractedText: API_ERROR_INVALID_KEY_MARKER }; // Specific marker
+           return { extractedText: API_ERROR_INVALID_KEY_MARKER };
        }
-        if (errorMsg.includes('quota') || errorMsg.includes('Quota')) {
+       if (errorMsg.includes('quota') || errorMsg.includes('Quota')) {
            console.error("Quota Exceeded Error detected.");
-           return { extractedText: API_ERROR_QUOTA_MARKER }; // Specific marker
+           return { extractedText: API_ERROR_QUOTA_MARKER };
        }
+       // Add more specific error checks if needed based on observed API responses
 
-       return { extractedText: OCR_PROCESSING_ERROR_MARKER };
+       // Fallback to a general API error marker
+       return { extractedText: GENERAL_API_ERROR_MARKER };
   }
 });
