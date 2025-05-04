@@ -30,8 +30,9 @@ export type ExtractMathTextInput = z.infer<typeof ExtractMathTextInputSchema>;
 
 const ExtractedExpressionSchema = z
     .string()
-    .optional()
-    .describe('Any isolated mathematical expression clearly identifiable within the image (e.g., "2x + 3 = 7"). Use standard notation (superscripts, √). If no distinct expression is found separate from the main text, this should be null or empty.');
+    .nullable() // Explicitly allow null
+    .optional() // Allow undefined as well
+    .describe('Any isolated mathematical expression clearly identifiable within the image (e.g., "2x + 3 = 7"). Use standard notation (superscripts, √). If no distinct expression is found separate from the main text, this should be null.');
 
 const FullTextSchema = z
     .string()
@@ -39,7 +40,7 @@ const FullTextSchema = z
 
 // Include preprocessed image in output
 const ExtractMathTextOutputSchema = z.object({
-  extractedExpression: ExtractedExpressionSchema,
+  extractedExpression: ExtractedExpressionSchema, // Now allows string | null | undefined
   fullText: FullTextSchema,
   preprocessedImageUri: z.string().optional().describe("Data URI of the preprocessed image used for OCR, if available."),
 });
@@ -103,7 +104,7 @@ const prompt = ai.definePrompt({
     // Output schema includes both full text and optional expression
     schema: z.object({
         fullText: FullTextSchema,
-        extractedExpression: ExtractedExpressionSchema
+        extractedExpression: ExtractedExpressionSchema // Updated schema
     }),
   },
   model: 'googleai/gemini-1.5-flash', // Use 1.5 Flash for vision capabilities
@@ -117,7 +118,7 @@ CRITICAL INSTRUCTIONS:
 2.  **IDENTIFY DISTINCT MATH EXPRESSION (Secondary Goal):** Look for a clearly defined mathematical equation or expression (e.g., \`2x + 3 = 11\`, \`∫(x²)dx\`, \`Area = πr²\`).
     *   If a distinct mathematical expression is found, extract it precisely using standard notation (see below) and place it in the 'extractedExpression' output field.
     *   If the math is embedded within a sentence (e.g., "Find the value of x if 2x+3=11."), extract only the "2x+3=11" part for 'extractedExpression'. The full sentence goes into 'fullText'.
-    *   If there is NO distinct mathematical expression, or if the math is just simple numbers within the text, the 'extractedExpression' output field should be null or empty.
+    *   If there is NO distinct mathematical expression, or if the math is just simple numbers within the text, the 'extractedExpression' output field MUST be null.
 3.  **HANDWRITING INTERPRETATION:** Apply common sense for handwritten text, prioritizing context.
     *   'l' likely '1', 'O' likely '0', 'S' likely '5', 'B' likely '8', 'Z' likely '2', 'g'/'q' likely '9', 't' likely '+'.
     *   Interpret 'x' as variable unless clearly multiplication ('×').
@@ -130,7 +131,7 @@ CRITICAL INSTRUCTIONS:
     *   Standard functions: sin, cos, tan, log, ln, lim, sum, int.
 5.  **STRICT OUTPUT FORMAT:** Respond with a JSON object containing two keys: 'fullText' and 'extractedExpression'.
     *   \`fullText\`: Contains *all* transcribed text. If NO text is readable, this field MUST be the exact string "NO_TEXT_FOUND".
-    *   \`extractedExpression\`: Contains the distinct mathematical expression (using notation above), or null/empty string if none is found.
+    *   \`extractedExpression\`: Contains the distinct mathematical expression (using notation above), or null if none is found.
     *   DO NOT add any explanations, greetings, or markdown formatting outside the JSON structure.
 
 JSON Output:`,
@@ -167,13 +168,14 @@ const extractMathTextFlow = ai.defineFlow<
      }
 
     // Check if output has the expected structure
-    if (!('fullText' in response.output)) { // extractedExpression is optional, so only check fullText
+    if (!('fullText' in response.output)) { // extractedExpression is optional/nullable, so only check fullText
         console.error("OCR flow received unexpected output structure:", response.output);
         return { fullText: OCR_PROCESSING_ERROR_MARKER, extractedExpression: null };
     }
 
     const fullTextResult = response.output.fullText;
-    const expressionResult = response.output.extractedExpression; // Might be null/undefined/empty
+    // Explicitly handle potential undefined/null for expression
+    const expressionResult = response.output.extractedExpression ?? null;
 
     // Handle null/undefined fullText explicitly -> NO_TEXT_FOUND
     if (fullTextResult === null || fullTextResult === undefined) {
@@ -183,7 +185,8 @@ const extractMathTextFlow = ai.defineFlow<
 
     // Trim whitespace from fullText
     const trimmedFullText = fullTextResult.trim();
-    const trimmedExpression = expressionResult?.trim() || null; // Trim if exists, else null
+    // Trim expression if it's a string, otherwise keep it as null
+    const trimmedExpression = typeof expressionResult === 'string' ? (expressionResult.trim() || null) : null;
 
     console.log("Trimmed full text:", trimmedFullText);
     console.log("Trimmed extracted expression:", trimmedExpression);
@@ -198,7 +201,7 @@ const extractMathTextFlow = ai.defineFlow<
     console.log("Returning valid extracted text and expression.");
     return {
         fullText: trimmedFullText,
-        extractedExpression: trimmedExpression
+        extractedExpression: trimmedExpression // This will be string or null
     };
 
   } catch (error: unknown) {
@@ -214,6 +217,17 @@ const extractMathTextFlow = ai.defineFlow<
            console.error("Quota Exceeded Error detected.");
            return { fullText: API_ERROR_QUOTA_MARKER, extractedExpression: null };
        }
+       // Check for the specific schema validation error
+       if (errorMsg.includes('Schema validation failed') && errorMsg.includes('extractedExpression')) {
+         console.error("Genkit schema validation failed for extractedExpression. Likely received null/undefined when string was expected by downstream validation (despite schema). Returning null.");
+         // Attempt to recover by returning null for expression, assuming fullText is okay (needs check).
+         // This part is tricky, ideally the schema definition change prevents this.
+         // If this block is hit, it suggests a deeper issue or Genkit bug.
+         // For now, let's assume the schema change fixes it and this block is less likely.
+         // If it persists, we might need to force an empty string instead of null.
+         return { fullText: GENERAL_API_ERROR_MARKER, extractedExpression: null }; // Defaulting to error for safety
+       }
+
 
        return { fullText: GENERAL_API_ERROR_MARKER, extractedExpression: null };
   }
