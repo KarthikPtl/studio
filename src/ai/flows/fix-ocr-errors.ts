@@ -88,7 +88,7 @@ Common OCR & Handwriting Errors to Look For:
 - 't' vs '+'
 - 'x' (variable) vs '*' (multiplication) vs '×' (times symbol) - Infer based on context. Aim for implicit multiplication (e.g., '2x') or the '×' symbol. Avoid '*'.
 - '/' (slash) vs '÷' (division symbol) - Aim for '÷' or fraction notation. Avoid '/'.
-- '^' (caret) vs Superscript characters (e.g., ², ³) - Aim for superscripts for simple exponents. Use `(base)^(exponent)` only if the exponent is complex.
+- '^' (caret) vs Superscript characters (e.g., ², ³) - Aim for superscripts for simple exponents. Use \\\`(base)^(exponent)\\\` only if the exponent is complex.
 - 'sqrt' vs '√' (square root symbol) - ALWAYS aim for '√'.
 - Misplaced or missing operators (+, -, =, etc.) - Add or correct operators *only* if the mathematical structure strongly implies it.
 - Incorrectly recognized exponents (e.g., 'x ^ 2' -> 'x²') or subscripts.
@@ -99,14 +99,14 @@ Instructions:
 1.  Analyze the input OCR Text: \`{{{ocrText}}}\`
 2.  Identify potential OCR or handwriting misreads based on the common errors and mathematical context.
 3.  Correct ONLY the errors that you are reasonably confident about, aiming for a more mathematically valid or standard representation using the preferred notation:
-    *   Use superscripts (², ³) for simple powers.
-    *   Use '√' for square roots.
-    *   Use '×' for multiplication (or implicit).
-    *   Use '÷' for division (or fractions).
+    *   Use superscripts (², ³) for simple powers like x², y³, 2³.
+    *   Use '√' for square roots (e.g., √16, √(x+1)).
+    *   Use '×' for multiplication (e.g., 3 × 4) or implicit multiplication (e.g., 2x, ab). Avoid '*'.
+    *   Use '÷' for division (e.g., 10 ÷ 2) or fraction notation (e.g., 1/2, (x+1)/(y-2)). Avoid '/'.
 4.  If a character looks like a standard variable (like 'x', 'y', 'a', 'b'), KEEP it as a variable unless the context overwhelmingly suggests it's a number or operator (e.g., '2x' should remain '2x').
 5.  Prioritize making the expression mathematically plausible. If a correction makes the expression nonsensical, revert it.
 6.  If the input text is already mathematically valid and uses the preferred standard notation, or if you are uncertain about potential corrections, return the ORIGINAL text unchanged. Do not force corrections.
-7.  Output ONLY the corrected (or original) mathematical expression. Do not add explanations, introductions, or markdown formatting.
+7.  Output ONLY the corrected (or original) mathematical expression. Do not add explanations, introductions, or markdown formatting like \`\`\`.
 
 OCR Text:
 \`{{{ocrText}}}\`
