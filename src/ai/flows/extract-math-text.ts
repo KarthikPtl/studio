@@ -23,11 +23,16 @@ export type ExtractMathTextInput = z.infer<typeof ExtractMathTextInputSchema>;
 const ExtractMathTextOutputSchema = z.object({
   extractedText: z
     .string()
-    .describe('The mathematical text extracted from the image, focusing only on the expression itself, or "NO_TEXT_FOUND" if no clear mathematical expression could be reliably identified.'),
+    .describe('The mathematical text extracted from the image, focusing only on the expression itself, or "NO_TEXT_FOUND" if no clear mathematical expression could be reliably identified, or "OCR_PROCESSING_ERROR" if the extraction process failed.'),
 });
 export type ExtractMathTextOutput = z.infer<typeof ExtractMathTextOutputSchema>;
 
 export async function extractMathText(input: ExtractMathTextInput): Promise<ExtractMathTextOutput> {
+  // Basic check for valid data URI format - this is a weak check
+  if (!input.imageDataUri || !input.imageDataUri.startsWith('data:image/')) {
+      console.error("Invalid imageDataUri format provided to extractMathText.");
+      return { extractedText: "OCR_PROCESSING_ERROR" };
+  }
   return extractMathTextFlow(input);
 }
 
@@ -46,31 +51,19 @@ const prompt = ai.definePrompt({
     schema: z.object({
       extractedText: z
         .string()
-        .describe('The mathematical text extracted from the image, focusing only on the expression itself, or "NO_TEXT_FOUND" if no clear mathematical expression could be reliably identified.'),
+        .describe('The mathematical text extracted from the image, focusing only on the expression itself. If NO clear mathematical expression is found, respond with the exact string "NO_TEXT_FOUND".'),
     }),
   },
   model: 'googleai/gemini-pro-vision', // Use Vision model
-  prompt: `You are an expert Optical Character Recognition (OCR) engine specialized in extracting mathematical expressions from images. Analyze the provided image with extreme care. Your primary goal is to isolate and extract *only* the mathematical expression, whether it's printed or handwritten.
+  prompt: `Analyze the provided image. Your task is to identify and extract ONLY the primary mathematical expression present, whether printed or handwritten.
 
-Think of this process like advanced image preprocessing for math:
-1.  **Isolate the Expression:** Mentally separate the core mathematical expression from *everything* else in the background or surrounding area. Ignore non-mathematical text (like question numbers, names, instructions), lines on paper, shadows, borders, digital artifacts, or complex backgrounds. Treat the main mathematical content as a single, coherent block (similar to Tesseract's Page Segmentation Mode 6).
-2.  **Enhance Clarity:** Imagine converting the expression to a high-contrast, black-and-white representation. Focus on the shapes of the characters and symbols.
-3.  **Character Recognition (Math Focus):** Identify characters strictly relevant to mathematics. Prioritize:
-    *   Numbers: 0-9
-    *   Variables: common letters like x, y, z, a, b, c, t, n, etc. (distinguish 'x' variable from '*' multiplication if context allows, prefer implicit multiplication).
-    *   Operators: +, -, *, /, =, <, >, ≤, ≥, ±, √ (sqrt), ^ (exponent), fraction bars.
-    *   Brackets/Parentheses: (), [], {}.
-    *   Common Functions: sin, cos, tan, log, ln.
-    *   Constants: π (pi), e.
-4.  **Structure Preservation:** Maintain the original structure, including fractions, exponents (e.g., x^2), subscripts (e.g., y_1), and the order of operations.
-
-Output Requirements:
-*   Return ONLY the extracted mathematical expression text. Be precise.
-    *   Example: Image shows "Q1: Solve 2x + 5 = 15". Output: "2x + 5 = 15"
-    *   Example: Image shows handwritten "y = (1/2)x - 3" on lined paper. Output: "y = (1/2)x - 3"
-    *   Example: Image shows "sqrt(a^2 + b^2)". Output: "sqrt(a^2 + b^2)"
-*   If, after thorough analysis, NO recognizable mathematical expression can be identified (e.g., image is blank, completely blurry, contains only non-math content like a drawing or unrelated text), output the exact string "NO_TEXT_FOUND". Do not guess or hallucinate an expression if none is clearly present.
-*   Do NOT add any explanations, formatting (like markdown code blocks), or introductory phrases. Just the raw expression or "NO_TEXT_FOUND".
+Instructions:
+1.  **Focus:** Extract only the mathematical characters, symbols, numbers, and standard function names (like sin, cos, log). Ignore surrounding text, background elements, paper lines, etc.
+2.  **Accuracy:** Preserve the original structure (fractions, exponents, parentheses).
+3.  **Output:**
+    *   If a clear mathematical expression is found, return *only* that expression as plain text.
+    *   If NO clear mathematical expression can be reliably identified in the image (e.g., image is blank, blurry, contains only non-math content), return the exact string "NO_TEXT_FOUND".
+    *   Do NOT add any explanations, greetings, or markdown formatting.
 
 Image: {{media url=imageDataUri}}
 
@@ -90,34 +83,38 @@ const extractMathTextFlow = ai.defineFlow<
     const { output } = await prompt(input);
     console.log("Raw Vision API Output:", output);
 
-
-    // Ensure output is not null/undefined, fallback if necessary
+    // Ensure output and extractedText are not null/undefined
     if (!output || output.extractedText === null || output.extractedText === undefined) {
-        console.warn("OCR flow returned null/undefined output. Defaulting to NO_TEXT_FOUND.");
-        return { extractedText: "NO_TEXT_FOUND" };
+        console.warn("OCR flow received null or undefined output from the model. Interpreting as NO_TEXT_FOUND.");
+        return { extractedText: "NO_TEXT_FOUND" }; // Or potentially OCR_PROCESSING_ERROR if this is unexpected
     }
 
     // Trim whitespace from the result
     const trimmedText = output.extractedText.trim();
 
-    // Check if, after trimming, the string is empty or exactly the placeholder
+    // Check if, after trimming, the string is empty
     if (trimmedText === "") {
       console.warn("OCR flow returned an empty string after trimming. Interpreting as NO_TEXT_FOUND.");
       return { extractedText: "NO_TEXT_FOUND" };
     }
 
-    // Return the trimmed result (could be "NO_TEXT_FOUND" or the actual expression)
+    // Handle cases where the model might explicitly return known non-math strings (though prompt asks for NO_TEXT_FOUND)
+    if (trimmedText.toUpperCase() === "NO_TEXT_FOUND") {
+        console.log("Model explicitly returned NO_TEXT_FOUND.");
+        return { extractedText: "NO_TEXT_FOUND" };
+    }
+
+    // Return the trimmed result (could be the actual expression or potentially still "NO_TEXT_FOUND")
     console.log("Returning extracted text:", trimmedText);
     return { extractedText: trimmedText };
 
   } catch (error) {
       console.error("Error executing extractMathTextFlow:", error);
-       // Log the specific error
+       // Log the specific error for debugging
        const errorMsg = error instanceof Error ? error.message : "An unknown error occurred during OCR.";
-       // Return a generic error indicator, distinct from NO_TEXT_FOUND
-       // The UI component will handle displaying a user-friendly message based on this.
-       // Avoid returning the raw error message to the schema.
-       // Using "OCR_PROCESSING_ERROR" might be clearer than just "OCR Error."
-      return { extractedText: "OCR_PROCESSING_ERROR" };
+       console.error("Underlying error:", errorMsg);
+
+       // Return the specific error indicator for the UI
+       return { extractedText: "OCR_PROCESSING_ERROR" };
   }
 });

@@ -35,6 +35,8 @@ export function MathSolver() {
       setCorrectedText('');
       setSolution('');
       setIsLoadingOcr(true);
+      setIsLoadingCorrection(false); // Ensure correction loading is reset
+      setIsLoadingSolution(false); // Ensure solution loading is reset
       setFile(uploadedFile); // Store file reference early
 
       console.log("Starting image upload process...");
@@ -49,6 +51,21 @@ export function MathSolver() {
 
       reader.onload = async () => {
           const imageDataUri = reader.result as string;
+          // Basic check if conversion resulted in a valid string
+           if (!imageDataUri || typeof imageDataUri !== 'string' || !imageDataUri.startsWith('data:image/')) {
+              console.error("Failed to read file as data URI.");
+              setError("Failed to process the image file. Please try again.");
+              toast({
+                  title: "File Read Error",
+                  description: "Could not read the uploaded image.",
+                  variant: "destructive",
+              });
+              setIsLoadingOcr(false);
+              if (tempImageUrl && tempImageUrl.startsWith('blob:')) { URL.revokeObjectURL(tempImageUrl); }
+              setImageUrl(null);
+              setFile(null);
+              return;
+          }
           console.log("Image converted to data URI (first 100 chars):", imageDataUri.substring(0, 100));
 
           try {
@@ -56,7 +73,7 @@ export function MathSolver() {
               const ocrResult = await extractMathText({ imageDataUri });
               console.log("OCR Result:", ocrResult);
 
-              const extracted = ocrResult.extractedText; // No need to trim here, flow handles it
+              const extracted = ocrResult.extractedText; // Flow should handle trimming
 
               if (extracted && extracted !== NO_TEXT_FOUND_MESSAGE && extracted !== OCR_PROCESSING_ERROR_MESSAGE) {
                   setOcrText(extracted);
@@ -65,7 +82,7 @@ export function MathSolver() {
                       description: "Successfully extracted text from the image.",
                   });
                   // Automatically trigger correction after successful OCR
-                  handleCorrection(extracted);
+                  handleCorrection(extracted); // This will set isLoadingCorrection
               } else if (extracted === NO_TEXT_FOUND_MESSAGE) {
                   setOcrText(NO_TEXT_FOUND_MESSAGE);
                   setCorrectedText(''); // Ensure corrected text is also cleared
@@ -75,45 +92,38 @@ export function MathSolver() {
                       description: "No mathematical text found.",
                       variant: "default",
                   });
-                   setIsLoadingCorrection(false); // No correction needed
-              } else { // Includes OCR_PROCESSING_ERROR_MESSAGE and potentially other unexpected null/empty cases
+              } else { // Includes OCR_PROCESSING_ERROR_MESSAGE and potentially other unexpected null/empty cases from the flow itself
                   setOcrText(OCR_PROCESSING_ERROR_MESSAGE); // Use the specific error constant
                   setCorrectedText('');
-                  const userMessage = extracted === OCR_PROCESSING_ERROR_MESSAGE
-                    ? "OCR processing failed. Please try again or use a different image."
-                    : "OCR failed unexpectedly. Please try again.";
+                  const userMessage = "OCR processing failed. This might be due to image issues, network problems, or an internal error. Please try again or use a different image.";
                   setError(userMessage);
                   toast({
                       title: "OCR Error",
                       description: userMessage,
                       variant: "destructive",
                   });
-                   setIsLoadingCorrection(false); // No correction possible
               }
-          } catch (err) {
-              console.error("Error calling extractMathText flow:", err);
+          } catch (err) { // Catch errors from calling the flow function itself
+              console.error("Error calling extractMathText flow function:", err);
               const errorMsg = err instanceof Error ? err.message : "An unknown error occurred.";
-              setError(`OCR Error: ${errorMsg}.`);
+              setError(`OCR Request Error: ${errorMsg}.`);
               setOcrText(OCR_PROCESSING_ERROR_MESSAGE); // Indicate processing error
               setCorrectedText('');
               toast({
-                  title: "OCR Error",
-                  description: `An error occurred during text extraction: ${errorMsg}`,
+                  title: "OCR Request Error",
+                  description: `An error occurred communicating with the OCR service: ${errorMsg}`,
                   variant: "destructive",
               });
-              setIsLoadingCorrection(false); // No correction possible
           } finally {
-              setIsLoadingOcr(false);
-              console.log("Finished OCR process.");
-              // ImageUploader handles blob URL cleanup
+              setIsLoadingOcr(false); // OCR process finished (success or fail)
+              console.log("Finished OCR attempt.");
+              // ImageUploader handles blob URL cleanup if necessary via its own effect
           }
       };
-      reader.onerror = (error) => {
-          console.error("Error reading file:", error);
+      reader.onerror = (errorEvent) => {
+          console.error("Error reading file with FileReader:", errorEvent);
           setError("Failed to read the uploaded image file.");
-          setIsLoadingOcr(false);
-          setIsLoadingCorrection(false);
-           toast({
+          toast({
                 title: "File Read Error",
                 description: "Could not process the uploaded image file.",
                 variant: "destructive",
@@ -122,6 +132,8 @@ export function MathSolver() {
                URL.revokeObjectURL(tempImageUrl);
            }
            setImageUrl(null);
+           setFile(null);
+           setIsLoadingOcr(false); // Ensure loading state is turned off
       };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [toast]); // Added handleCorrection dependency later
@@ -131,13 +143,13 @@ export function MathSolver() {
       if (!textToCorrect || textToCorrect === NO_TEXT_FOUND_MESSAGE || textToCorrect === OCR_PROCESSING_ERROR_MESSAGE) {
         console.warn("Skipping correction for input:", textToCorrect);
         setCorrectedText(''); // Clear corrected text if OCR failed or found nothing
-        setIsLoadingCorrection(false);
+        setIsLoadingCorrection(false); // Ensure this is off if skipped
         return;
       }
 
-      setError(null);
+      setError(null); // Clear previous errors
       setIsLoadingCorrection(true);
-      setSolution('');
+      setSolution(''); // Clear previous solution
       console.log("Calling fixOcrErrors flow with text:", textToCorrect);
 
       try {
@@ -151,11 +163,11 @@ export function MathSolver() {
                 : "AI reviewed the text, no changes needed.",
           });
           // Optional: Trigger solve after successful correction
-          // handleSolve(result.correctedText);
-      } catch (err) {
-          console.error("Error correcting OCR text:", err);
+          // handleSolve(result.correctedText); // This would set isLoadingSolution
+      } catch (err) { // Catch errors from calling the correction flow function
+          console.error("Error calling fixOcrErrors flow function:", err);
           const errorMsg = err instanceof Error ? err.message : "An unknown error occurred.";
-          setError(`Correction Error: ${errorMsg}. You can edit the text manually.`);
+          setError(`Correction Request Error: ${errorMsg}. You can edit the text manually.`);
           setCorrectedText(textToCorrect); // Fallback to original OCR text on correction error
           toast({
               title: "Correction Failed",
@@ -172,41 +184,47 @@ export function MathSolver() {
   const handleSolve = useCallback(async (equation: string) => {
     const trimmedEquation = equation?.trim();
 
-    // Check for invalid or non-mathematical inputs
+    // Check for invalid or non-mathematical inputs before calling the API
     if (!trimmedEquation || trimmedEquation === NO_TEXT_FOUND_MESSAGE || trimmedEquation === OCR_PROCESSING_ERROR_MESSAGE) {
-        const reason = !trimmedEquation ? "empty" : `"${trimmedEquation}" (Indicates OCR failure or no text found)`;
-        setError(`Cannot solve. The input expression is ${reason}. Please upload a valid image or edit the text.`);
+        const reason = !trimmedEquation ? "empty" :
+                       trimmedEquation === NO_TEXT_FOUND_MESSAGE ? "indicates no text found" :
+                       "indicates an OCR error occurred";
+        const userMessage = `Cannot solve. The input expression ${reason}. Please upload a valid image or edit the text.`;
+        setError(userMessage);
         toast({
-            title: "Invalid Equation",
-            description: `Cannot solve. Input is ${reason}.`,
+            title: "Invalid Input",
+            description: userMessage,
             variant: "destructive",
         });
         setSolution(''); // Clear any previous solution
-        setIsLoadingSolution(false);
+        setIsLoadingSolution(false); // Ensure loading is off
         return;
     }
 
-    setError(null);
+    setError(null); // Clear previous errors
     setSolution('');
     setIsLoadingSolution(true);
     console.log("Calling solveMathExpression flow with equation:", trimmedEquation);
     try {
         const result = await solveMathExpression({ expression: trimmedEquation });
         console.log("Solver Result:", result);
-        setSolution(result.solution); // This might contain error messages from the solver AI too
+        // The flow itself might return a solution starting with "Error:"
+        setSolution(result.solution);
          toast({
               title: "Solution Processed",
+              // Check if the *returned* solution indicates an error
               description: result.solution.startsWith("Error:") ? "Solver encountered an issue. See details below." : "Solution generated successfully.",
               variant: result.solution.startsWith("Error:") ? "destructive" : "default",
          });
-    } catch (err) {
-        console.error("Error solving equation:", err);
+    } catch (err) { // Catch errors from calling the solve flow function
+        console.error("Error calling solveMathExpression flow function:", err);
         const errorMsg = err instanceof Error ? err.message : "An unknown error occurred.";
-        setError(`Solver Error: ${errorMsg}.`);
-        setSolution(`Error: An unexpected error occurred while calling the solver: ${errorMsg}`);
+        const solutionErrorMsg = `Error: An unexpected error occurred while calling the solver: ${errorMsg}`;
+        setError(`Solver Request Error: ${errorMsg}.`); // Error for the alert box
+        setSolution(solutionErrorMsg); // Error message in the solution area
          toast({
               title: "Solving Error",
-              description: `Could not solve the equation: ${errorMsg}`,
+              description: `Could not solve the equation due to a request error: ${errorMsg}`,
               variant: "destructive",
           });
     } finally {
@@ -248,6 +266,7 @@ export function MathSolver() {
   const handleTextChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const newText = e.target.value;
     setCorrectedText(newText);
+    // If user edits, clear the previous solution and error as they are likely invalid now
     if (solution) {
         setSolution('');
     }
@@ -259,14 +278,14 @@ export function MathSolver() {
   // Determine if the 'Correct with AI' button should be enabled
   const canCorrect = ocrText && ocrText !== NO_TEXT_FOUND_MESSAGE && ocrText !== OCR_PROCESSING_ERROR_MESSAGE;
   // Determine if the 'Solve Equation' button should be enabled
-  const canSolve = correctedText && correctedText.trim() !== '';
+  const canSolve = correctedText && correctedText.trim() !== '' && correctedText !== NO_TEXT_FOUND_MESSAGE && correctedText !== OCR_PROCESSING_ERROR_MESSAGE;
 
 
   return (
     <div className="container mx-auto p-4 md:p-8">
-      <Card className="mb-6 shadow-lg rounded-lg">
+      <Card className="mb-6 shadow-lg rounded-lg border border-border">
         <CardHeader>
-          <CardTitle className="text-2xl font-bold text-center">MathSnap Solver</CardTitle>
+          <CardTitle className="text-2xl font-bold text-center text-foreground">MathSnap Solver</CardTitle>
           <CardDescription className="text-center text-muted-foreground">
             Upload an image of a math problem (printed or handwritten), let AI extract & correct it, then solve!
           </CardDescription>
@@ -274,25 +293,26 @@ export function MathSolver() {
       </Card>
 
       {error && (
-          <Alert variant="destructive" className="mb-4 shadow-sm rounded-md">
-            <AlertTitle>Error</AlertTitle>
+          <Alert variant="destructive" className="mb-4 shadow-sm rounded-md border-destructive/50">
+            <AlertTitle>Error Encountered</AlertTitle>
             <AlertDescription>{error}</AlertDescription>
           </Alert>
         )}
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         {/* Image Upload Panel */}
-        <Card className="shadow-md rounded-lg">
+        <Card className="shadow-md rounded-lg border border-border">
           <CardHeader>
             <CardTitle className="text-lg font-semibold">1. Upload Image</CardTitle>
              <CardDescription>Drop or select a clear image of the math problem.</CardDescription>
           </CardHeader>
-          <CardContent>
+          <CardContent className="flex flex-col">
             <ImageUploader
               onImageUpload={handleImageUpload}
               imageUrl={imageUrl}
               setImageUrl={setImageUrl}
               setFile={setFile}
+              className="flex-grow" // Allow uploader to take space
             />
              {isLoadingOcr && (
                 <div className="mt-4 flex items-center justify-center text-muted-foreground">
@@ -304,14 +324,14 @@ export function MathSolver() {
         </Card>
 
         {/* OCR & Correction Panel */}
-        <Card className="shadow-md rounded-lg flex flex-col">
+        <Card className="shadow-md rounded-lg border border-border flex flex-col">
           <CardHeader>
             <CardTitle className="text-lg font-semibold">2. Extracted & Corrected Text</CardTitle>
              <CardDescription>
-                View extracted text, AI correction, and edit if needed.
+                View extracted text, AI correction (if any), and edit if needed.
              </CardDescription>
           </CardHeader>
-          <CardContent className="relative flex flex-col flex-grow min-h-[300px]">
+          <CardContent className="relative flex flex-col flex-grow min-h-[300px]"> {/* Ensure content takes space */}
             {(isLoadingOcr || isLoadingCorrection) && (
                <div className="absolute inset-0 bg-background/80 flex flex-col items-center justify-center z-10 rounded-md p-4 text-center">
                  <LoadingSpinner />
@@ -321,8 +341,8 @@ export function MathSolver() {
                </div>
             )}
 
-            <div className="flex flex-col flex-grow gap-4 mb-4">
-                 <div className="flex-1 flex flex-col">
+            <div className="flex flex-col flex-grow gap-4 mb-4"> {/* Container for text areas */}
+                 <div className="flex-1 flex flex-col"> {/* Make OCR area flexible */}
                      <label htmlFor="ocrText" className="text-sm font-medium text-muted-foreground block mb-1">Raw OCR Output:</label>
                      <Textarea
                         id="ocrText"
@@ -333,11 +353,11 @@ export function MathSolver() {
                         }
                         readOnly
                         placeholder={isLoadingOcr ? "Extracting..." : "OCR output appears here..."}
-                        className="min-h-[100px] bg-secondary/50 text-muted-foreground resize-none flex-grow"
+                        className="min-h-[100px] bg-secondary/50 text-muted-foreground resize-none flex-grow" // Use flex-grow
                         aria-label="Original OCR Output"
                      />
                  </div>
-                 <div className="flex-1 flex flex-col">
+                 <div className="flex-1 flex flex-col"> {/* Make Corrected area flexible */}
                      <label htmlFor="correctedText" className="text-sm font-medium block mb-1">Editable Text:</label>
                      <Textarea
                         id="correctedText"
@@ -350,14 +370,15 @@ export function MathSolver() {
                             ocrText === OCR_PROCESSING_ERROR_MESSAGE ? "Correction unavailable due to OCR error." :
                             "Upload image first..."
                          }
-                        className="min-h-[100px] focus:ring-primary focus:border-primary resize-none flex-grow"
+                        className="min-h-[100px] focus:ring-primary focus:border-primary resize-none flex-grow" // Use flex-grow
                         aria-label="Editable Corrected Text"
-                        disabled={isLoadingOcr || isLoadingCorrection || ocrText === OCR_PROCESSING_ERROR_MESSAGE || ocrText === NO_TEXT_FOUND_MESSAGE && !correctedText} // Disable if loading or if OCR failed/found nothing and field is empty
+                        // Disable if loading, or if OCR failed/found nothing AND user hasn't typed anything yet
+                        disabled={isLoadingOcr || isLoadingCorrection || ((ocrText === OCR_PROCESSING_ERROR_MESSAGE || ocrText === NO_TEXT_FOUND_MESSAGE) && !correctedText)}
                      />
                  </div>
             </div>
 
-            <div className="mt-auto flex flex-col sm:flex-row gap-2">
+            <div className="mt-auto flex flex-col sm:flex-row gap-2"> {/* Buttons at the bottom */}
                 <Button
                   onClick={() => handleCorrection(ocrText)}
                   disabled={!canCorrect || isLoadingOcr || isLoadingCorrection || isLoadingSolution}
@@ -382,39 +403,41 @@ export function MathSolver() {
         </Card>
 
         {/* Solution Panel */}
-        <Card className="shadow-md rounded-lg flex flex-col">
+        <Card className="shadow-md rounded-lg border border-border flex flex-col">
           <CardHeader>
             <CardTitle className="text-lg font-semibold">3. Solution</CardTitle>
              <CardDescription>The AI-powered solution or analysis.</CardDescription>
           </CardHeader>
-          <CardContent className="relative flex-grow flex flex-col min-h-[300px]">
+          <CardContent className="relative flex-grow flex flex-col min-h-[300px]"> {/* Ensure content takes space */}
             {isLoadingSolution && (
-                 <div className="absolute inset-0 bg-background/80 flex flex-col items-center justify-center z-10 rounded-md m-6 mt-0 mb-4 p-4 text-center">
+                 <div className="absolute inset-0 bg-background/80 flex flex-col items-center justify-center z-10 rounded-md m-6 mt-0 mb-4 p-4 text-center"> {/* Adjust margins */}
                     <LoadingSpinner />
                     <span className="ml-2 mt-2 text-muted-foreground">Solving...</span>
                  </div>
             )}
-            <div className="bg-secondary/30 p-4 rounded-md flex-grow overflow-auto min-h-[150px] mb-4">
-              {solution ? (
-                <pre className="text-sm font-mono whitespace-pre-wrap text-left w-full">{solution}</pre>
-              ) : (
-                <div className="flex items-center justify-center h-full">
-                    <p className="text-muted-foreground text-center">
-                    {isLoadingSolution ? 'Calculating...' :
-                        canSolve ? 'Ready to solve. Click "Solve Equation".' :
-                        !imageUrl ? 'Upload an image first.' :
-                        ocrText === NO_TEXT_FOUND_MESSAGE ? 'No text found in image to solve.' :
-                        ocrText === OCR_PROCESSING_ERROR_MESSAGE ? 'Cannot solve due to OCR error.' :
-                        'Solution will appear here.'
-                    }
-                    </p>
-                </div>
-              )}
-            </div>
+            {/* Scrollable Solution Area */}
+            <ScrollArea className="flex-grow border bg-secondary/30 p-4 rounded-md mb-4 min-h-[200px]"> {/* Use ScrollArea, flex-grow */}
+                {solution ? (
+                    <pre className="text-sm font-mono whitespace-pre-wrap break-words text-foreground">{solution}</pre>
+                ) : (
+                    <div className="flex items-center justify-center h-full">
+                        <p className="text-muted-foreground text-center">
+                        {isLoadingSolution ? 'Calculating...' :
+                            canSolve ? 'Ready to solve. Click "Solve Equation".' :
+                            !imageUrl ? 'Upload an image first.' :
+                            ocrText === NO_TEXT_FOUND_MESSAGE ? 'No text found in image to solve.' :
+                            ocrText === OCR_PROCESSING_ERROR_MESSAGE ? 'Cannot solve due to OCR error.' :
+                            'Solution will appear here.'
+                        }
+                        </p>
+                    </div>
+                )}
+            </ScrollArea>
+             {/* Clear All Button at the bottom */}
             <Button
                 variant="outline"
                 onClick={handleClearAll}
-                className="w-full mt-auto"
+                className="w-full mt-auto" // Ensure it's at the bottom
                 disabled={isLoadingOcr || isLoadingCorrection || isLoadingSolution}
                 aria-label="Clear all fields and the uploaded image"
             >
@@ -427,3 +450,6 @@ export function MathSolver() {
     </div>
   );
 }
+
+// Import ScrollArea at the top
+import { ScrollArea } from "@/components/ui/scroll-area";
