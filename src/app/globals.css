@@ -91,12 +91,12 @@ body {
     --tw-prose-invert-hr: hsl(var(--border));
     --tw-prose-invert-quotes: hsl(var(--foreground));
     --tw-prose-invert-quote-borders: hsl(var(--border));
-    --tw-prose-invert-captions': hsl(var(--muted-foreground));
+    --tw-prose-invert-captions: hsl(var(--muted-foreground));
     --tw-prose-invert-code: hsl(var(--foreground));
-    --tw-prose-invert-pre-code': hsl(var(--card-foreground));
-    --tw-prose-invert-pre-bg': hsl(var(--card));
-    --tw-prose-invert-th-borders': hsl(var(--border));
-    --tw-prose-invert-td-borders': hsl(var(--border));
+    --tw-prose-invert-pre-code: hsl(var(--card-foreground));
+    --tw-prose-invert-pre-bg: hsl(var(--card));
+    --tw-prose-invert-th-borders: hsl(var(--border));
+    --tw-prose-invert-td-borders: hsl(var(--border));
   }
 }
 
