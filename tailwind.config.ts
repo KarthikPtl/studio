@@ -64,7 +64,8 @@ export default {
   		borderRadius: {
   			lg: 'var(--radius)',
   			md: 'calc(var(--radius) - 2px)',
-  			sm: 'calc(var(--radius) - 4px)'
+  			sm: 'calc(var(--radius) - 4px)',
+        xl: 'calc(var(--radius) + 4px)' // Added for larger radius option
   		},
   		keyframes: {
   			'accordion-down': {
@@ -88,63 +89,54 @@ export default {
   			'accordion-down': 'accordion-down 0.2s ease-out',
   			'accordion-up': 'accordion-up 0.2s ease-out'
   		},
-      // Add typography plugin customization if needed
+      // Typography plugin customization - Simplified as colors are handled in globals.css
       typography: ({ theme }: { theme: (path: string) => string }) => ({
         DEFAULT: {
           css: {
-            '--tw-prose-body': theme('colors.foreground'),
-            '--tw-prose-headings': theme('colors.foreground'),
-            '--tw-prose-lead': theme('colors.foreground'),
-            '--tw-prose-links': theme('colors.primary.DEFAULT'),
-            '--tw-prose-bold': theme('colors.foreground'),
-            '--tw-prose-counters': theme('colors.muted.foreground'),
-            '--tw-prose-bullets': theme('colors.muted.foreground'),
-            '--tw-prose-hr': theme('colors.border'),
-            '--tw-prose-quotes': theme('colors.foreground'),
-            '--tw-prose-quote-borders': theme('colors.border'),
-            '--tw-prose-captions': theme('colors.muted.foreground'),
-            '--tw-prose-code': theme('colors.foreground'), // Use foreground for inline code
-            '--tw-prose-pre-code': theme('colors.card.foreground'), // Specific color for code blocks
-            '--tw-prose-pre-bg': theme('colors.card.DEFAULT'), // Background for code blocks
-            '--tw-prose-th-borders': theme('colors.border'),
-            '--tw-prose-td-borders': theme('colors.border'),
-            '--tw-prose-invert-body': theme('colors.foreground'), // Invert for dark mode if needed
-            '--tw-prose-invert-headings': theme('colors.foreground'),
-            '--tw-prose-invert-lead': theme('colors.foreground'),
-            '--tw-prose-invert-links': theme('colors.primary.DEFAULT'),
-            '--tw-prose-invert-bold': theme('colors.foreground'),
-            '--tw-prose-invert-counters': theme('colors.muted.foreground'),
-            '--tw-prose-invert-bullets': theme('colors.muted.foreground'),
-            '--tw-prose-invert-hr': theme('colors.border'),
-            '--tw-prose-invert-quotes': theme('colors.foreground'),
-            '--tw-prose-invert-quote-borders': theme('colors.border'),
-            '--tw-prose-invert-captions': theme('colors.muted.foreground'),
-            '--tw-prose-invert-code': theme('colors.foreground'),
-            '--tw-prose-invert-pre-code': theme('colors.card.foreground'),
-            '--tw-prose-invert-pre-bg': theme('colors.card.DEFAULT'),
-            '--tw-prose-invert-th-borders': theme('colors.border'),
-            '--tw-prose-invert-td-borders': theme('colors.border'),
-            // Customize specific elements
-            code: {
-              backgroundColor: 'hsl(var(--muted) / 0.2)', // Subtle background for inline code
-              padding: '0.2em 0.4em',
-              margin: '0',
-              fontSize: '85%',
-              borderRadius: '0.25rem',
-              fontWeight: '400', // Ensure it's not too bold
-            },
-            'code::before': {
-              content: '""', // Remove backticks added by prose
-            },
-            'code::after': {
-              content: '""', // Remove backticks added by prose
-            },
-             // Style blockquotes
+            // Base prose colors now inherited from globals.css via HSL vars
+            '--tw-prose-body': 'hsl(var(--foreground))',
+            '--tw-prose-headings': 'hsl(var(--foreground))',
+            '--tw-prose-lead': 'hsl(var(--foreground))',
+            '--tw-prose-links': 'hsl(var(--primary))',
+            '--tw-prose-bold': 'hsl(var(--foreground))',
+            '--tw-prose-counters': 'hsl(var(--muted-foreground))',
+            '--tw-prose-bullets': 'hsl(var(--muted-foreground))',
+            '--tw-prose-hr': 'hsl(var(--border))',
+            '--tw-prose-quotes': 'hsl(var(--muted-foreground))',
+            '--tw-prose-quote-borders': 'hsl(var(--primary))',
+            '--tw-prose-captions': 'hsl(var(--muted-foreground))',
+            '--tw-prose-code': 'hsl(var(--foreground))',
+            '--tw-prose-pre-code': 'hsl(var(--card-foreground))',
+            '--tw-prose-pre-bg': 'hsl(var(--card))',
+            '--tw-prose-th-borders': 'hsl(var(--border))',
+            '--tw-prose-td-borders': 'hsl(var(--border))',
+            // Dark mode handled by .dark .prose in globals.css
+            '--tw-prose-invert-body': 'hsl(var(--foreground))',
+            '--tw-prose-invert-headings': 'hsl(var(--foreground))',
+            '--tw-prose-invert-lead': 'hsl(var(--foreground))',
+            '--tw-prose-invert-links': 'hsl(var(--primary))',
+            '--tw-prose-invert-bold': 'hsl(var(--foreground))',
+            '--tw-prose-invert-counters': 'hsl(var(--muted-foreground))',
+            '--tw-prose-invert-bullets': 'hsl(var(--muted-foreground))',
+            '--tw-prose-invert-hr': 'hsl(var(--border))',
+            '--tw-prose-invert-quotes': 'hsl(var(--muted-foreground))',
+            '--tw-prose-invert-quote-borders': 'hsl(var(--primary))',
+            '--tw-prose-invert-captions': 'hsl(var(--muted-foreground))',
+            '--tw-prose-invert-code': 'hsl(var(--foreground))',
+            '--tw-prose-invert-pre-code': 'hsl(var(--card-foreground))',
+            '--tw-prose-invert-pre-bg': 'hsl(var(--card))',
+            '--tw-prose-invert-th-borders': 'hsl(var(--border))',
+            '--tw-prose-invert-td-borders': 'hsl(var(--border))',
+             // Specific element styles (kept for structure/non-color adjustments)
+             'code::before': { content: 'none' },
+             'code::after': { content: 'none' },
              blockquote: {
-              borderLeftColor: 'hsl(var(--primary))',
-              fontStyle: 'normal',
-              color: 'hsl(var(--muted-foreground))',
-            },
+               fontStyle: 'normal', // Keeping italic via class if needed
+             },
+             'h1,h2,h3,h4,h5,h6': {
+               fontWeight: theme('fontWeight.semibold'), // Use theme value
+             },
+             // Add other non-color structural overrides if needed
           },
         },
       }),

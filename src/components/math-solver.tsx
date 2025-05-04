@@ -4,17 +4,19 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import Image from 'next/image';
 import ReactMarkdown from 'react-markdown';
+import remarkMath from 'remark-math';
+import rehypeKatex from 'rehype-katex';
 import { fixOcrErrors } from '@/ai/flows/fix-ocr-errors';
 import { extractMathText } from '@/ai/flows/extract-math-text';
 import { solveMathExpression } from '@/ai/flows/solve-math-expression';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Input } from '@/components/ui/input'; // Import Input for corrected expression
+import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
 import { ImageUploader } from '@/components/image-uploader';
 import { LoadingSpinner } from '@/components/loading-spinner';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Eraser, BrainCircuit, Files } from 'lucide-react'; // Added Files icon
+import { Eraser, BrainCircuit, Image as ImageIcon } from 'lucide-react'; // Replaced Files with ImageIcon
 import { useToast } from "@/hooks/use-toast";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
@@ -28,9 +30,8 @@ const GENERAL_API_ERROR_MARKER = "API_GENERAL_ERROR";
 const OCR_BLOCKED_BY_SAFETY_MARKER = "OCR_BLOCKED_BY_SAFETY";
 const MATH_AI_ERROR_PREFIX = "**Error:**";
 
-// List of upstream messages that bypass correction/solving in the component UI
-const BYPASS_CORRECTION_MESSAGES = [
-    NO_TEXT_FOUND_MESSAGE,
+// List of upstream messages that should bypass correction/solving
+const BYPASS_ALL_PROCESSING_MESSAGES = [
     OCR_PROCESSING_ERROR_MESSAGE,
     PREPROCESSING_ERROR_MARKER,
     API_ERROR_INVALID_KEY_MARKER,
@@ -38,7 +39,6 @@ const BYPASS_CORRECTION_MESSAGES = [
     GENERAL_API_ERROR_MARKER,
     OCR_BLOCKED_BY_SAFETY_MARKER,
 ];
-
 
 export function MathSolver() {
   const [imageUrl, setImageUrl] = useState<string | null>(null);
@@ -74,19 +74,17 @@ export function MathSolver() {
       const ocrResult = await extractMathText({ imageDataUri });
       console.log("OCR Result Received:", ocrResult);
 
-      if (ocrResult?.preprocessedImageUri) {
+       if (ocrResult?.preprocessedImageUri) {
           setPreprocessedImageUrl(ocrResult.preprocessedImageUri);
           console.log("Preprocessed image URI received.");
       } else {
-          console.log("No preprocessed image URI received.");
-          // Use the original image if preprocessing failed or wasn't performed
-          setPreprocessedImageUrl(imageDataUri);
+          console.log("No preprocessed image URI received, using original.");
+          setPreprocessedImageUrl(imageDataUri); // Use original if none provided
       }
 
-      // Check primary output field 'fullText' for errors or valid text
       if (!ocrResult || typeof ocrResult.fullText !== 'string') {
         console.error("Received invalid or null response structure from OCR service.");
-        setOcrFullText(OCR_PROCESSING_ERROR_MESSAGE); // Use fullText state for main status
+        setOcrFullText(OCR_PROCESSING_ERROR_MESSAGE);
         setError("An unexpected issue occurred during OCR processing (invalid response).");
         toast({ title: "OCR Error", description: "Invalid response from OCR service.", variant: "destructive" });
       } else {
@@ -95,24 +93,25 @@ export function MathSolver() {
         setOcrFullText(fullText);
         setOcrExpression(expression);
 
-        // Handle specific OCR outcomes
         if (fullText === NO_TEXT_FOUND_MESSAGE) {
           toast({ title: "OCR Result", description: "No readable text found in the image.", variant: "default" });
-          setCorrectedFullText(''); // Clear corrected text as well
+          setCorrectedFullText('');
           setCorrectedExpression(null);
-        } else if (BYPASS_CORRECTION_MESSAGES.includes(fullText)) {
+        } else if (BYPASS_ALL_PROCESSING_MESSAGES.includes(fullText)) {
            const displayError = fullText.startsWith("API_") ? "API Error" :
                                 fullText.startsWith("PREPROCESSING") ? "Preprocessing Error" :
                                 fullText === OCR_BLOCKED_BY_SAFETY_MARKER ? "Blocked by Safety" :
                                 "OCR Processing Error";
            setError(`OCR failed: ${displayError}. Check image, API key, or try again.`);
            toast({ title: "OCR Error", description: `Text extraction failed: ${displayError}`, variant: "destructive" });
-           setCorrectedFullText(''); // Clear corrected text
+           setCorrectedFullText('');
            setCorrectedExpression(null);
         } else {
-          // Valid text found, trigger correction
-          toast({ title: "Text Extracted", description: expression ? "Found text and a math expression." : "Found text (no distinct math expression)." });
-          triggerCorrection(fullText, expression);
+          // Valid text found, set corrected state initially to raw OCR output
+          setCorrectedFullText(fullText);
+          setCorrectedExpression(expression);
+          toast({ title: "Text Extracted", description: expression ? "Found text and a math expression." : "Found text." });
+          // Correction is now triggered by button click
         }
       }
     } catch (err) {
@@ -128,62 +127,59 @@ export function MathSolver() {
       console.log("Finished OCR attempt.");
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [toast]); // Dependencies updated below
+  }, [toast]); // Keep dependencies minimal
 
-  const triggerCorrection = useCallback(async (textToCorrect: string, expressionToCorrect: string | null) => {
-    // Check only textToCorrect for bypass messages, as it's the primary indicator
-    if (!textToCorrect || BYPASS_CORRECTION_MESSAGES.includes(textToCorrect)) {
-      console.warn("Skipping correction due to upstream status:", textToCorrect);
-      setCorrectedFullText(''); // Keep corrected states empty/null
-      setCorrectedExpression(null);
-      setIsLoadingCorrection(false);
+  const handleAiCorrection = useCallback(async () => {
+    // Use the CURRENTLY displayed/edited text for correction
+    const textToCorrect = correctedFullText;
+    const expressionToCorrect = correctedExpression;
+
+    if (!textToCorrect || BYPASS_ALL_PROCESSING_MESSAGES.includes(ocrFullText)) { // Check original OCR status
+      console.warn("Skipping AI correction due to initial OCR status:", ocrFullText);
+      toast({ title: "Correction Skipped", description: "Cannot run AI correction due to initial OCR error or no text.", variant: "destructive"});
       return;
     }
 
     setIsLoadingCorrection(true);
     setError(null);
-    setSolution('');
-    console.log("Calling fixOcrErrors flow...");
+    setSolution(''); // Clear solution when recorrecting
+    console.log("Calling fixOcrErrors flow for AI correction...");
 
     try {
       const result = await fixOcrErrors({ ocrText: textToCorrect, ocrExpression: expressionToCorrect });
-      console.log("Correction Result:", result);
+      console.log("AI Correction Result:", result);
 
-      if (!result || typeof result.correctedText !== 'string') { // correctedExpression can be null
+      if (!result || typeof result.correctedText !== 'string') {
         console.error("Received invalid or null response from correction service.");
-        setCorrectedFullText(textToCorrect); // Fallback to raw OCR
-        setCorrectedExpression(expressionToCorrect);
-        toast({ title: "Correction Error", description: "Invalid response from correction service.", variant: "destructive" });
+        // Don't revert, keep user edits if AI fails
+        toast({ title: "Correction Error", description: "Invalid response from AI correction service.", variant: "destructive" });
       } else {
         setCorrectedFullText(result.correctedText);
-        setCorrectedExpression(result.correctedExpression || null); // Ensure null if empty/falsy
+        setCorrectedExpression(result.correctedExpression || null);
         const changesMade = result.correctedText !== textToCorrect || result.correctedExpression !== expressionToCorrect;
         toast({
-          title: "Correction Attempted",
-          description: changesMade ? "AI reviewed and potentially corrected text/expression." : "AI reviewed text/expression, no changes needed.",
+          title: "AI Correction Applied",
+          description: changesMade ? "AI has updated the text/expression." : "AI reviewed, no changes suggested.",
         });
-        // Ready for potential solve, triggered by user button
       }
     } catch (err) {
-      console.error("Error during correction process:", err);
+      console.error("Error during AI correction process:", err);
       const errorMsg = err instanceof Error ? err.message : "Unknown error.";
-      setError(`Correction Process Error: Failed to communicate with AI (${errorMsg}).`);
-      setCorrectedFullText(textToCorrect); // Fallback to raw OCR on error
-      setCorrectedExpression(expressionToCorrect);
-      toast({ title: "Correction Call Failed", description: "Could not reach correction service.", variant: "destructive" });
+      setError(`AI Correction Error: Failed to communicate with AI (${errorMsg}).`);
+      // Don't revert on error
+      toast({ title: "Correction Call Failed", description: "Could not reach AI correction service.", variant: "destructive" });
     } finally {
       setIsLoadingCorrection(false);
-      console.log("Finished correction attempt.");
+      console.log("Finished AI correction attempt.");
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [toast]);
+  }, [correctedFullText, correctedExpression, ocrFullText, toast]); // Add ocrFullText dependency
 
   const handleSolve = useCallback(async () => {
-    // Use the corrected text as the primary input for context
     const context = correctedFullText?.trim();
-    const expression = correctedExpression?.trim() || null; // Use corrected expression, ensure null if empty
+    const expression = correctedExpression?.trim() || null;
 
-    if (!context || BYPASS_CORRECTION_MESSAGES.includes(context)) {
+    if (!context || BYPASS_ALL_PROCESSING_MESSAGES.includes(ocrFullText)) { // Check original OCR status
        const reason = !context ? "is empty" : "indicates an error occurred earlier";
        const userMessage = `Cannot solve because the text context ${reason}. Please upload/edit first.`;
        setSolution(`${MATH_AI_ERROR_PREFIX} ${userMessage}`);
@@ -191,7 +187,6 @@ export function MathSolver() {
        setIsLoadingSolution(false);
        return;
     }
-    // No need to check expression separately here, the solver flow handles null expression
 
     setIsLoadingSolution(true);
     setError(null);
@@ -230,7 +225,7 @@ export function MathSolver() {
       console.log("Finished solving attempt.");
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [correctedFullText, correctedExpression, toast]);
+  }, [correctedFullText, correctedExpression, ocrFullText, toast]); // Add ocrFullText dependency
 
   // --- Event Handlers ---
 
@@ -295,7 +290,6 @@ export function MathSolver() {
     if (imageUrl && imageUrl.startsWith('blob:')) {
       URL.revokeObjectURL(imageUrl);
     }
-    // Assume preprocessedImageUrl might also be a blob URL that needs cleanup
     if (preprocessedImageUrl && preprocessedImageUrl.startsWith('blob:')) {
         URL.revokeObjectURL(preprocessedImageUrl);
     }
@@ -315,188 +309,186 @@ export function MathSolver() {
     toast({ title: "Cleared", description: "All fields reset." });
   };
 
-  // Manual dependency management (if needed, though often better handled by ESLint rules)
-  useEffect(() => {
-    // No explicit manual linking needed here with current structure
-  }, [triggerOcr, triggerCorrection, handleSolve]);
-
+  // No manual linking needed in useEffect
 
   // --- Derived State for UI ---
 
   const rawOcrDisplayFullText = isLoadingOcr ? "Extracting text..." :
                            ocrFullText === NO_TEXT_FOUND_MESSAGE ? "No readable text found." :
-                           BYPASS_CORRECTION_MESSAGES.includes(ocrFullText) ? `OCR failed: ${ocrFullText}` :
+                           BYPASS_ALL_PROCESSING_MESSAGES.includes(ocrFullText) ? `OCR failed: ${ocrFullText}` :
                            ocrFullText ? ocrFullText : "Upload an image to start.";
 
   const rawOcrDisplayExpression = isLoadingOcr ? "Extracting..." :
-                                  !ocrFullText || BYPASS_CORRECTION_MESSAGES.includes(ocrFullText) ? "N/A" :
+                                  !ocrFullText || BYPASS_ALL_PROCESSING_MESSAGES.includes(ocrFullText) ? "N/A" :
                                   ocrExpression ? ocrExpression : "(No distinct expression found)";
 
   const correctedTextPlaceholder = isLoadingCorrection ? "AI correcting..." :
-                                  ocrFullText && !BYPASS_CORRECTION_MESSAGES.includes(ocrFullText) ? "Edit full text if needed..." :
-                                  ocrFullText === NO_TEXT_FOUND_MESSAGE ? "No text found to correct." :
-                                  BYPASS_CORRECTION_MESSAGES.includes(ocrFullText) ? "Cannot edit due to OCR error." :
+                                  ocrFullText && !BYPASS_ALL_PROCESSING_MESSAGES.includes(ocrFullText) ? "Edit full text if needed..." :
+                                  ocrFullText === NO_TEXT_FOUND_MESSAGE ? "No text found to correct or edit." :
+                                  BYPASS_ALL_PROCESSING_MESSAGES.includes(ocrFullText) ? "Cannot edit due to OCR error." :
                                   "Upload image first...";
 
   const correctedExpressionPlaceholder = isLoadingCorrection ? "AI correcting..." :
-                                  ocrFullText && !BYPASS_CORRECTION_MESSAGES.includes(ocrFullText) ? "Edit expression if needed..." :
+                                  ocrFullText && !BYPASS_ALL_PROCESSING_MESSAGES.includes(ocrFullText) ? "Edit expression if needed..." :
                                   ocrFullText === NO_TEXT_FOUND_MESSAGE ? "No expression found." :
-                                   BYPASS_CORRECTION_MESSAGES.includes(ocrFullText) ? "N/A" :
+                                  BYPASS_ALL_PROCESSING_MESSAGES.includes(ocrFullText) ? "N/A" :
                                   "Expression (if any) appears here...";
 
-  // Determine if the 'Solve' button should be enabled - primarily based on having valid corrected text context
-  const canSolve = correctedFullText && correctedFullText.trim() !== '' && !BYPASS_CORRECTION_MESSAGES.includes(correctedFullText);
+  const canSolve = correctedFullText && correctedFullText.trim() !== '' && !BYPASS_ALL_PROCESSING_MESSAGES.includes(ocrFullText);
+  const canCorrect = correctedFullText && correctedFullText.trim() !== '' && !BYPASS_ALL_PROCESSING_MESSAGES.includes(ocrFullText);
 
   // --- JSX ---
   return (
-    <div className="container mx-auto p-4 md:p-8">
-      <Card className="mb-6 shadow-lg rounded-lg border border-border">
-        <CardHeader>
-          <CardTitle className="text-2xl font-bold text-center text-foreground">MathSnap Solver</CardTitle>
-          <CardDescription className="text-center text-muted-foreground">
-            Upload a math problem (expression or word problem), verify the text, and get the solution!
-          </CardDescription>
-        </CardHeader>
-      </Card>
+    <div className="container mx-auto p-4 md:p-6 lg:p-8">
 
       {error && (
-        <Alert variant="destructive" className="mb-4 shadow-sm rounded-md border-destructive/50">
-          <AlertTitle>Error Encountered</AlertTitle>
+        <Alert variant="destructive" className="mb-6 shadow-md rounded-lg border-destructive/60 bg-destructive/10">
+          <AlertTitle className="font-semibold">Error Encountered</AlertTitle>
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 lg:gap-8">
 
-        {/* 1. Image Upload Panel */}
-        <Card className="shadow-md rounded-lg border border-border flex flex-col h-full"> {/* Ensure full height */}
-          <CardHeader>
-            <CardTitle className="text-lg font-semibold">1. Upload Image</CardTitle>
-            <CardDescription>Drop or select a clear image.</CardDescription>
+        {/* --- Left Panel: Upload & Preview --- */}
+        <Card className="shadow-lg rounded-xl border border-border/80 bg-card backdrop-blur-sm bg-opacity-80 flex flex-col h-full overflow-hidden">
+          <CardHeader className="border-b border-border/50 pb-4">
+            <CardTitle className="text-lg font-semibold flex items-center gap-2">
+              <ImageIcon className="w-5 h-5 text-primary" />
+              1. Upload Image
+            </CardTitle>
+            <CardDescription className="text-sm">Drop or select a clear image of your math problem.</CardDescription>
           </CardHeader>
-          <CardContent className="flex flex-col flex-grow p-4"> {/* flex-grow needed */}
+          <CardContent className="flex flex-col flex-grow p-4 md:p-6 items-center justify-center">
             <ImageUploader
               onImageUpload={handleImageUpload}
               imageUrl={imageUrl}
               setImageUrl={setImageUrl}
               setFile={setFile}
-              className="flex-grow mb-4 min-h-[250px]" // Uploader takes available space
+              className="flex-grow w-full mb-4 min-h-[200px] md:min-h-[250px] transition-all duration-300 ease-in-out hover:shadow-inner"
             />
             {isLoadingOcr && (
-              <div className="mt-auto flex items-center justify-center text-muted-foreground p-2">
-                <LoadingSpinner size={18} className="mr-2" />
-                <span>Extracting text...</span>
+              <div className="mt-auto flex items-center justify-center text-muted-foreground p-2 text-sm">
+                <LoadingSpinner size={16} className="mr-2 text-primary" />
+                <span>Processing Image...</span>
               </div>
             )}
           </CardContent>
         </Card>
 
-        {/* 2. Verify & Solve Panel */}
-        <Card className="shadow-md rounded-lg border border-border flex flex-col h-full"> {/* Ensure full height */}
-          <CardHeader>
-            <CardTitle className="text-lg font-semibold">2. Verify & Solve</CardTitle>
-            <CardDescription>Review OCR, Preprocessed Image, Edit, then Solve.</CardDescription>
+        {/* --- Middle Panel: Verify & Edit --- */}
+        <Card className="shadow-lg rounded-xl border border-border/80 bg-card backdrop-blur-sm bg-opacity-80 flex flex-col h-full relative overflow-hidden">
+          {(isLoadingOcr || isLoadingCorrection) && (
+             <div className="absolute inset-0 bg-background/80 flex flex-col items-center justify-center z-20 rounded-xl p-4 text-center backdrop-blur-sm">
+               <LoadingSpinner className="text-primary" />
+               <span className="mt-2 text-muted-foreground text-sm">
+                 {isLoadingOcr ? 'Extracting Text...' : 'AI Correcting...'}
+               </span>
+             </div>
+          )}
+          <CardHeader className="border-b border-border/50 pb-4">
+            <CardTitle className="text-lg font-semibold">2. Verify & Edit Text</CardTitle>
+            <CardDescription className="text-sm">Review the extracted text. Edit if needed before solving.</CardDescription>
           </CardHeader>
-          <CardContent className="relative flex flex-col flex-grow p-4">
-            {(isLoadingOcr || isLoadingCorrection) && (
-               <div className="absolute inset-0 bg-background/80 flex flex-col items-center justify-center z-10 rounded-md p-4 text-center">
-                 <LoadingSpinner />
-                 <span className="ml-2 mt-2 text-muted-foreground">
-                   {isLoadingOcr ? 'Processing Image...' : 'AI correcting...'}
-                 </span>
-               </div>
-            )}
-
-            {/* Use ScrollArea for the content inside Verify & Solve card */}
-            <ScrollArea className="flex-grow mb-4 -mx-4 px-4"> {/* Adjust padding */}
-              <div className="flex flex-col gap-4">
-                 {/* Raw OCR Full Text Output (Readonly) */}
-                 <div className="flex flex-col">
-                     <label htmlFor="ocrFullText" className="text-sm font-medium text-muted-foreground block mb-1">Raw OCR - Full Text:</label>
+          <CardContent className="flex flex-col flex-grow p-4 md:p-6 space-y-4">
+            <ScrollArea className="flex-grow -mx-4 px-4"> {/* Full height scroll */}
+              <div className="space-y-4">
+                 {/* Raw OCR Full Text Output */}
+                 <div>
+                     <label htmlFor="ocrFullText" className="text-xs font-medium text-muted-foreground block mb-1">Raw OCR - Full Text</label>
                      <Textarea
                         id="ocrFullText"
-                        name="ocrFullText"
                         value={rawOcrDisplayFullText}
                         readOnly
-                        placeholder={isLoadingOcr ? "Extracting..." : "Raw full text output..."}
-                        className="min-h-[80px] bg-secondary/50 text-muted-foreground resize-y"
+                        placeholder="Raw text from image..."
+                        className="min-h-[60px] bg-muted/40 border-border/50 text-muted-foreground resize-none text-sm rounded-md shadow-inner"
                         aria-label="Raw OCR Full Text Output (Readonly)"
                      />
                  </div>
 
-                 {/* Raw OCR Expression Output (Readonly) */}
-                 <div className="flex flex-col">
-                     <label htmlFor="ocrExpression" className="text-sm font-medium text-muted-foreground block mb-1">Raw OCR - Expression:</label>
+                 {/* Raw OCR Expression Output */}
+                 <div>
+                     <label htmlFor="ocrExpression" className="text-xs font-medium text-muted-foreground block mb-1">Raw OCR - Isolated Expression</label>
                      <Input
                         id="ocrExpression"
-                        name="ocrExpression"
                         value={rawOcrDisplayExpression}
                         readOnly
-                        placeholder={isLoadingOcr ? "Extracting..." : "Isolated expression..."}
-                        className="bg-secondary/50 text-muted-foreground"
+                        placeholder="Expression..."
+                        className="bg-muted/40 border-border/50 text-muted-foreground text-sm rounded-md shadow-inner"
                         aria-label="Raw OCR Isolated Expression (Readonly)"
                      />
                  </div>
 
                  {/* Preprocessed Image Preview */}
-                 <div className="flex flex-col">
-                    <label className="text-sm font-medium text-muted-foreground block mb-1">Preprocessed Image:</label>
-                    <div className="border rounded-md p-2 bg-secondary/30 min-h-[100px] flex items-center justify-center">
+                 <div>
+                    <label className="text-xs font-medium text-muted-foreground block mb-1">Preprocessed Image Preview</label>
+                    <div className="border border-border/50 rounded-md p-2 bg-muted/30 min-h-[80px] flex items-center justify-center shadow-inner">
                         {preprocessedImageUrl ? (
                             <Image
                                 src={preprocessedImageUrl}
                                 alt="Preprocessed Math Problem"
-                                width={300}
-                                height={150}
-                                className="max-h-[150px] w-auto object-contain rounded-sm"
-                                data-ai-hint="preprocessed math problem text"
+                                width={250}
+                                height={125}
+                                className="max-h-[100px] w-auto object-contain rounded-sm"
+                                data-ai-hint="preprocessed math text"
                             />
                         ) : (
-                            <span className="text-xs text-muted-foreground text-center">
-                                {isLoadingOcr ? 'Generating...' : imageUrl ? 'No preprocessing applied or needed.' : 'Upload image first.'}
+                            <span className="text-xs text-muted-foreground text-center px-4">
+                                {isLoadingOcr ? 'Generating preview...' : imageUrl ? 'Preview appears here.' : 'Upload image first.'}
                             </span>
                         )}
                     </div>
                  </div>
 
-                 {/* Corrected Full Text (Editable) */}
-                 <div className="flex flex-col">
-                     <label htmlFor="correctedFullText" className="text-sm font-medium block mb-1">Parsed Text (Editable):</label>
+                 {/* Corrected/Editable Full Text */}
+                 <div className="relative group">
+                     <label htmlFor="correctedFullText" className="text-xs font-medium text-foreground block mb-1">Parsed Text (Editable)</label>
                      <Textarea
                         id="correctedFullText"
                         name="correctedFullText"
                         value={correctedFullText}
                         onChange={handleTextChange}
                         placeholder={correctedTextPlaceholder}
-                        className="min-h-[80px] focus:ring-primary focus:border-primary resize-y"
+                        className="min-h-[80px] focus:ring-primary focus:border-primary resize-y text-sm rounded-md shadow-sm transition-shadow focus:shadow-md"
                         aria-label="Parsed Full Text (Editable)"
-                        disabled={isProcessing || !ocrFullText || BYPASS_CORRECTION_MESSAGES.includes(ocrFullText)}
+                        disabled={isProcessing || !ocrFullText || BYPASS_ALL_PROCESSING_MESSAGES.includes(ocrFullText)}
                      />
                  </div>
 
-                 {/* Corrected Expression (Editable) */}
-                 <div className="flex flex-col">
-                     <label htmlFor="correctedExpression" className="text-sm font-medium block mb-1">Parsed Expression (Editable):</label>
+                 {/* Corrected/Editable Expression */}
+                 <div className="relative group">
+                     <label htmlFor="correctedExpression" className="text-xs font-medium text-foreground block mb-1">Parsed Expression (Editable)</label>
                      <Input
                         id="correctedExpression"
                         name="correctedExpression"
                         value={correctedExpression ?? ''} // Use ?? '' for controlled input
                         onChange={handleTextChange}
                         placeholder={correctedExpressionPlaceholder}
-                        className="focus:ring-primary focus:border-primary"
+                        className="focus:ring-primary focus:border-primary text-sm rounded-md shadow-sm transition-shadow focus:shadow-md"
                         aria-label="Parsed Expression (Editable)"
-                        disabled={isProcessing || !ocrFullText || BYPASS_CORRECTION_MESSAGES.includes(ocrFullText)}
+                        disabled={isProcessing || !ocrFullText || BYPASS_ALL_PROCESSING_MESSAGES.includes(ocrFullText)}
                      />
                  </div>
               </div>
             </ScrollArea>
 
-            <div className="mt-auto"> {/* Button stays at bottom */}
+            <div className="mt-auto pt-4 space-y-2 border-t border-border/50"> {/* Buttons area */}
+                 <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleAiCorrection}
+                    disabled={!canCorrect || isProcessing}
+                    className="w-full text-xs"
+                    aria-label="Attempt to automatically correct OCR errors using AI"
+                 >
+                    {isLoadingCorrection ? <LoadingSpinner size={14} className="mr-1" /> : <BrainCircuit className="mr-1 h-3.5 w-3.5" />}
+                    Correct with AI
+                 </Button>
                  <Button
                     onClick={handleSolve}
                     disabled={!canSolve || isProcessing}
-                    className="w-full"
-                    aria-label="Solve the problem described in the Parsed Text box"
+                    className="w-full font-semibold"
+                    aria-label="Solve the problem based on the parsed text"
                 >
                     {isLoadingSolution ? <LoadingSpinner className="mr-2" /> : <BrainCircuit className="mr-2 h-4 w-4" />}
                     Solve Problem
@@ -505,42 +497,46 @@ export function MathSolver() {
           </CardContent>
         </Card>
 
-        {/* 3. Solution Panel */}
-        <Card className="shadow-md rounded-lg border border-border flex flex-col h-full"> {/* Ensure full height */}
-          <CardHeader>
+        {/* --- Right Panel: Solution --- */}
+        <Card className="shadow-lg rounded-xl border border-border/80 bg-card backdrop-blur-sm bg-opacity-80 flex flex-col h-full relative overflow-hidden">
+           {isLoadingSolution && (
+               <div className="absolute inset-0 bg-background/80 flex flex-col items-center justify-center z-20 rounded-xl p-4 text-center backdrop-blur-sm">
+                  <LoadingSpinner className="text-primary" />
+                  <span className="mt-2 text-muted-foreground text-sm">Generating Solution...</span>
+               </div>
+           )}
+          <CardHeader className="border-b border-border/50 pb-4">
             <CardTitle className="text-lg font-semibold">3. Solution</CardTitle>
-            <CardDescription>The AI-generated step-by-step solution.</CardDescription>
+            <CardDescription className="text-sm">The step-by-step solution appears here.</CardDescription>
           </CardHeader>
-          <CardContent className="relative flex flex-col flex-grow p-4">
-             {isLoadingSolution && (
-                 <div className="absolute inset-0 bg-background/80 flex flex-col items-center justify-center z-10 rounded-md p-4 text-center">
-                    <LoadingSpinner />
-                    <span className="ml-2 mt-2 text-muted-foreground">Solving...</span>
-                 </div>
-             )}
-
-            <ScrollArea className="flex-grow border bg-secondary/30 p-4 rounded-md mb-4 min-h-[300px]">
-                {solution ? (
-                   <div className="prose prose-sm max-w-none text-foreground dark:prose-invert prose-headings:my-2 prose-p:my-1 prose-ul:my-1 prose-li:my-0 prose-strong:text-primary">
-                      <ReactMarkdown>{solution}</ReactMarkdown>
-                   </div>
-                ) : (
-                    <div className="flex items-center justify-center h-full text-center text-muted-foreground">
-                        {isProcessing && !isLoadingSolution ? 'Processing previous steps...' :
-                         !imageUrl ? 'Upload an image first.' :
-                         ocrFullText === NO_TEXT_FOUND_MESSAGE ? 'No text found to solve.' :
-                         BYPASS_CORRECTION_MESSAGES.includes(ocrFullText) ? 'Cannot solve due to OCR error.' :
-                         !correctedFullText && !isProcessing ? 'Verify/Edit text to solve.' :
-                         'Solution will appear here after solving.'
-                         }
-                    </div>
-                )}
+          <CardContent className="flex flex-col flex-grow p-4 md:p-6">
+            <ScrollArea className="flex-grow border border-border/50 bg-secondary/30 p-4 rounded-lg mb-4 min-h-[250px] shadow-inner">
+                <div className="prose prose-sm max-w-none text-foreground dark:prose-invert prose-p:my-1 prose-headings:my-2 prose-ul:my-1 prose-li:my-0 prose-strong:text-primary prose-code:before:content-none prose-code:after:content-none prose-code:bg-muted/30 prose-code:px-1 prose-code:py-0.5 prose-code:rounded-sm prose-code:font-normal">
+                   {solution ? (
+                     <ReactMarkdown
+                       remarkPlugins={[remarkMath]}
+                       rehypePlugins={[rehypeKatex]}
+                     >
+                       {solution}
+                     </ReactMarkdown>
+                   ) : (
+                       <div className="flex items-center justify-center h-full text-center text-muted-foreground text-sm">
+                           {isProcessing && !isLoadingSolution ? 'Processing previous steps...' :
+                            !imageUrl ? 'Upload an image first.' :
+                            ocrFullText === NO_TEXT_FOUND_MESSAGE ? 'No text found to solve.' :
+                            BYPASS_ALL_PROCESSING_MESSAGES.includes(ocrFullText) ? 'Cannot solve due to OCR error.' :
+                            !correctedFullText && !isProcessing ? 'Verify/Edit text, then click Solve.' :
+                            'Solution will appear here after solving.'
+                           }
+                       </div>
+                   )}
+                </div>
             </ScrollArea>
 
             <Button
                 variant="outline"
                 onClick={handleClearAll}
-                className="w-full mt-auto" // Button stays at bottom
+                className="w-full mt-auto font-medium" // Button stays at bottom
                 disabled={isProcessing}
                 aria-label="Clear all fields and the uploaded image"
             >
@@ -553,5 +549,3 @@ export function MathSolver() {
     </div>
   );
 }
-
-    
