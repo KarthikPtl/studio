@@ -4,7 +4,7 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { useDropzone } from 'react-dropzone';
 import Image from 'next/image';
-import { UploadCloud, X, Camera, Video, CheckSquare } from 'lucide-react';
+import { UploadCloud, X, Camera, CheckSquare } from 'lucide-react'; // Removed unused Video icon
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -29,22 +29,27 @@ export function ImageUploader({ onImageUpload, imageUrl, setImageUrl, setFile, c
   const streamRef = useRef<MediaStream | null>(null); // Store the stream to stop it later
   const { toast } = useToast(); // Initialize toast
 
-  // Request Camera Permission
+  // Request Camera Permission and handle cleanup
   useEffect(() => {
-    if (!showCamera) {
-        // Stop camera if user switches back to upload
-        if (streamRef.current) {
-            streamRef.current.getTracks().forEach(track => track.stop());
-            streamRef.current = null;
-            if (videoRef.current) {
-                videoRef.current.srcObject = null;
-            }
-            setHasCameraPermission(null); // Reset permission state
-            console.log("Camera stream stopped.");
+    // Cleanup function: stop stream if active
+    const stopStream = () => {
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop());
+        streamRef.current = null;
+        if (videoRef.current) {
+            videoRef.current.srcObject = null;
         }
+        setHasCameraPermission(null); // Reset permission state
+        console.log("Camera stream stopped.");
+      }
+    };
+
+    if (!showCamera) {
+        stopStream(); // Stop camera if user switches back to upload
         return;
     }
 
+    // If showing camera, request permission
     const getCameraPermission = async () => {
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
         console.error('Camera API not supported.');
@@ -58,7 +63,13 @@ export function ImageUploader({ onImageUpload, imageUrl, setImageUrl, setFile, c
       }
 
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } }); // Prefer rear camera
+        // Try to get rear camera first, fallback to any video source
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } } })
+          .catch(async (e) => {
+            console.warn("Rear camera failed, trying default camera:", e);
+            return await navigator.mediaDevices.getUserMedia({ video: true });
+          });
+
         streamRef.current = stream; // Store stream
         setHasCameraPermission(true);
         console.log("Camera permission granted.");
@@ -67,7 +78,6 @@ export function ImageUploader({ onImageUpload, imageUrl, setImageUrl, setFile, c
           videoRef.current.srcObject = stream;
           videoRef.current.play().catch(err => {
             console.error("Error playing video stream:", err);
-            // Handle autoplay error (rare but possible)
             toast({
                 variant: 'destructive',
                 title: 'Video Playback Error',
@@ -88,14 +98,8 @@ export function ImageUploader({ onImageUpload, imageUrl, setImageUrl, setFile, c
 
     getCameraPermission();
 
-    // Cleanup function to stop the stream when the component unmounts or showCamera becomes false
-    return () => {
-        if (streamRef.current) {
-            streamRef.current.getTracks().forEach(track => track.stop());
-            streamRef.current = null;
-            console.log("Camera stream stopped on cleanup.");
-        }
-    };
+    // Return the cleanup function to be called on unmount or when showCamera becomes false
+    return stopStream;
   }, [showCamera, toast]); // Dependency on showCamera
 
   const onDrop = useCallback(
@@ -104,6 +108,7 @@ export function ImageUploader({ onImageUpload, imageUrl, setImageUrl, setFile, c
       setShowCamera(false); // Ensure camera is hidden on drop
       if (acceptedFiles && acceptedFiles.length > 0) {
         const file = acceptedFiles[0];
+        // Revoke previous blob URL if it exists
         if (imageUrl && imageUrl.startsWith('blob:')) {
             URL.revokeObjectURL(imageUrl);
         }
@@ -113,10 +118,10 @@ export function ImageUploader({ onImageUpload, imageUrl, setImageUrl, setFile, c
         onImageUpload(file);
       }
     },
-    [imageUrl, onImageUpload, setImageUrl, setFile]
+    [imageUrl, onImageUpload, setImageUrl, setFile] // Added dependencies
   );
 
-  // Cleanup temporary URL
+  // Cleanup temporary object URL when component unmounts or imageUrl changes
   useEffect(() => {
      return () => {
        if (imageUrl && imageUrl.startsWith('blob:')) {
@@ -127,19 +132,32 @@ export function ImageUploader({ onImageUpload, imageUrl, setImageUrl, setFile, c
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
-    accept: { 'image/jpeg': [], 'image/png': [] },
+    accept: { 'image/jpeg': [], 'image/png': [], 'image/webp': [] }, // Added webp
+    maxSize: 5 * 1024 * 1024, // 5MB limit
     multiple: false,
     noClick: showCamera, // Disable click opening file dialog when camera is active
     noKeyboard: showCamera,
     onDragEnter: () => setIsDragging(true),
     onDragLeave: () => setIsDragging(false),
+    onDropRejected: (fileRejections) => {
+        setIsDragging(false);
+        fileRejections.forEach(({ file, errors }) => {
+          errors.forEach(error => {
+             if (error.code === 'file-too-large') {
+                toast({ title: 'File Too Large', description: `"${file.name}" is larger than 5MB.`, variant: 'destructive' });
+             } else if (error.code === 'file-invalid-type') {
+                toast({ title: 'Invalid File Type', description: `"${file.name}" is not a supported image type (JPG, PNG, WEBP).`, variant: 'destructive' });
+             } else {
+                toast({ title: 'File Error', description: error.message, variant: 'destructive' });
+             }
+          });
+        });
+    }
   });
 
   const handleClear = (e?: React.MouseEvent) => {
-    e?.stopPropagation();
-    if (imageUrl && imageUrl.startsWith('blob:')) {
-        URL.revokeObjectURL(imageUrl);
-    }
+    e?.stopPropagation(); // Prevent dropzone activation if clicking inside
+    // No need to revoke here, useEffect handles it
     setImageUrl(null);
     setFile(null);
     setShowCamera(false); // Ensure camera is off when clearing
@@ -149,8 +167,15 @@ export function ImageUploader({ onImageUpload, imageUrl, setImageUrl, setFile, c
       e.stopPropagation(); // Prevent triggering dropzone
       handleClear(); // Clear existing image when switching modes
       setShowCamera(prev => !prev);
-      setHasCameraPermission(null); // Reset permission state on toggle
+      // Permission state reset is handled by useEffect cleanup/re-run
   };
+
+  const switchToUpload = (e: React.MouseEvent) => {
+      e.stopPropagation();
+      setShowCamera(false); // Turn off camera
+      // Resources are cleaned up by useEffect
+  };
+
 
   const handleCapture = useCallback(async () => {
       if (!videoRef.current || !canvasRef.current || !hasCameraPermission) {
@@ -170,7 +195,7 @@ export function ImageUploader({ onImageUpload, imageUrl, setImageUrl, setFile, c
           return;
       }
 
-      // Set canvas dimensions to video dimensions
+      // Set canvas dimensions to video dimensions for higher quality capture
       canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
 
@@ -191,7 +216,7 @@ export function ImageUploader({ onImageUpload, imageUrl, setImageUrl, setFile, c
 
           // Create a temporary URL for preview
           if (imageUrl && imageUrl.startsWith('blob:')) {
-              URL.revokeObjectURL(imageUrl);
+              URL.revokeObjectURL(imageUrl); // Clean up old blob URL
           }
           const newImageUrl = URL.createObjectURL(capturedFile);
 
@@ -201,10 +226,10 @@ export function ImageUploader({ onImageUpload, imageUrl, setImageUrl, setFile, c
           setShowCamera(false); // Hide camera view after capture
 
           console.log("Image captured successfully.");
-          toast({ title: "Image Captured", description: "Processing captured image..." });
+          toast({ title: "Image Captured", description: "Processing captured image...", icon: <CheckSquare className="h-5 w-5 text-green-500" /> });
           setIsCapturing(false); // Re-enable buttons
 
-      }, 'image/png'); // Specify PNG format
+      }, 'image/png', 0.9); // Specify PNG format, quality (optional for PNG)
 
   }, [hasCameraPermission, setImageUrl, setFile, onImageUpload, imageUrl, toast]);
 
@@ -230,60 +255,69 @@ export function ImageUploader({ onImageUpload, imageUrl, setImageUrl, setFile, c
         {/* Always render input, but it's disabled via dropzone config when camera is on */}
         <input {...getInputProps()} />
 
-        {/* Top Buttons */}
+        {/* Top Buttons Container */}
         <div className={cn(
             "absolute top-3 right-3 z-10 flex gap-2",
-            showCamera && "p-2 bg-background/70 rounded-lg" // Background for camera buttons
+            showCamera && "p-2 bg-background/70 rounded-lg backdrop-blur-sm" // Add backdrop blur for camera
             )}>
-          {imageUrl && !showCamera && (
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={handleClear}
-              className="bg-background/80 hover:bg-destructive/10 hover:text-destructive rounded-full h-7 w-7"
-              aria-label="Clear image"
-            >
-              <X className="h-4 w-4" />
-            </Button>
-          )}
-          {!imageUrl && ( // Only show toggle if no image is loaded
+
+           {/* Clear Button (Show only if image loaded AND not in camera mode) */}
+           {imageUrl && !showCamera && (
              <Button
-               variant={showCamera ? "secondary" : "ghost"}
+               variant="ghost"
                size="icon"
-               onClick={toggleCamera}
+               onClick={handleClear}
+               className="bg-destructive/10 text-destructive hover:bg-destructive/20 rounded-full h-7 w-7"
+               aria-label="Clear image"
+             >
+               <X className="h-4 w-4" />
+             </Button>
+           )}
+
+          {/* Toggle Camera/Upload Button */}
+          {!imageUrl && ( // Only show toggle if no image is actively loaded/previewed
+             <Button
+               variant="ghost"
+               size="icon"
+               onClick={showCamera ? switchToUpload : toggleCamera} // Change action based on mode
                className="bg-background/80 hover:bg-primary/10 hover:text-primary rounded-full h-7 w-7"
                aria-label={showCamera ? "Switch to file upload" : "Switch to camera"}
-               disabled={isCapturing}
+               disabled={isCapturing} // Disable while capturing
              >
                {showCamera ? <UploadCloud className="h-4 w-4" /> : <Camera className="h-4 w-4" />}
              </Button>
           )}
         </div>
 
+
         {/* Main Content Area */}
         {showCamera ? (
           <div className="w-full h-full flex flex-col items-center justify-center bg-black rounded-xl">
             {/* Video Feed */}
-            <video
-                ref={videoRef}
-                className="w-full h-auto max-h-[calc(100%-60px)] object-contain rounded-t-xl" // Adjust max-height to leave space for button
-                autoPlay
-                playsInline // Important for iOS
-                muted // Mute to avoid feedback loops if microphone was enabled
-                aria-label="Camera Feed"
-            />
+            <div className="relative w-full flex-grow overflow-hidden">
+              <video
+                  ref={videoRef}
+                  className="w-full h-full object-cover rounded-t-xl" // Use object-cover to fill area
+                  autoPlay
+                  playsInline // Important for iOS
+                  muted // Mute to avoid feedback loops if microphone was enabled
+                  aria-label="Camera Feed"
+              />
+               {hasCameraPermission === null && (
+                   <div className="absolute inset-0 flex items-center justify-center bg-black/50 text-white text-sm">
+                       Requesting camera access...
+                   </div>
+               )}
+            </div>
              {/* Capture Button & Permission Message */}
-            <div className="w-full p-3 flex flex-col items-center justify-center bg-background rounded-b-xl">
+            <div className="w-full p-3 flex flex-col items-center justify-center bg-background rounded-b-xl border-t border-border/50">
                 {hasCameraPermission === false && (
                     <Alert variant="destructive" className="mb-2 text-xs">
                       <AlertTitle>Camera Access Denied</AlertTitle>
                       <AlertDescription>
-                        Enable camera permissions in browser settings.
+                        Please enable camera permissions in browser settings to use this feature.
                       </AlertDescription>
                     </Alert>
-                )}
-                 {hasCameraPermission === null && (
-                    <div className="text-sm text-muted-foreground p-2">Requesting camera...</div>
                 )}
                 <Button
                   onClick={handleCapture}
@@ -291,8 +325,8 @@ export function ImageUploader({ onImageUpload, imageUrl, setImageUrl, setFile, c
                   className="w-full font-semibold bg-primary text-primary-foreground hover:bg-primary/90 rounded-lg shadow-sm hover:shadow-md transition-all"
                   aria-label="Capture image from camera"
                 >
-                  {isCapturing ? 'Capturing...' : <CheckSquare className="mr-2 h-4 w-4" />}
-                  {isCapturing ? 'Please wait' : 'Capture Photo'}
+                  <CheckSquare className="mr-2 h-4 w-4" />
+                  {isCapturing ? 'Capturing...' : 'Capture Photo'}
                 </Button>
             </div>
           </div>
@@ -301,13 +335,17 @@ export function ImageUploader({ onImageUpload, imageUrl, setImageUrl, setFile, c
           <>
             <Image
               src={imageUrl}
-              alt="Uploaded Math Expression"
+              alt="Uploaded Math Problem"
               width={400}
-              height={200}
+              height={300} // Increased height for better preview
               className="max-h-[300px] w-auto object-contain rounded-lg shadow-md"
-              data-ai-hint="math equation"
-              // Ensure the image rerenders if the src changes
-              key={imageUrl}
+              data-ai-hint="math equation problem"
+              key={imageUrl} // Force re-render if src changes
+              onError={(e) => {
+                console.error("Image load error:", e);
+                toast({ title: "Image Load Failed", description: "Could not display the preview.", variant: "destructive"});
+                handleClear(); // Clear if preview fails
+              }}
             />
             <p className="mt-4 text-sm text-muted-foreground">Drag 'n' drop or click to replace</p>
           </>
@@ -318,11 +356,10 @@ export function ImageUploader({ onImageUpload, imageUrl, setImageUrl, setFile, c
             <p className="font-medium text-sm text-foreground">
               {isDragActive ? "Drop the image here..." : "Drag & drop image, or click to select"}
             </p>
-            <p className="text-xs text-gray-500">Supports JPG, PNG (Max 5MB)</p>
+            <p className="text-xs text-gray-500">Supports JPG, PNG, WEBP (Max 5MB)</p>
           </div>
         )}
       </CardContent>
     </Card>
   );
 }
-
