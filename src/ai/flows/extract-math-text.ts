@@ -12,7 +12,7 @@
 import { ai } from '@/ai/ai-instance';
 import { z } from 'genkit';
 import { CandidateData } from 'genkit/ai'; // Import CandidateData for safety check
-import { preprocessImageForOcr } from './image-preprocessing'; // Corrected import path
+import { preprocessImageForOcr } from '@/ai/flows/image-preprocessing'; // Import the preprocessing function
 
 
 // Define reusable schemas
@@ -45,6 +45,8 @@ const NO_TEXT_FOUND_MARKER = "NO_TEXT_FOUND";
 const OCR_PROCESSING_ERROR_MARKER = "OCR_PROCESSING_ERROR";
 const OCR_BLOCKED_BY_SAFETY_MARKER = "OCR_BLOCKED_BY_SAFETY";
 const PREPROCESSING_ERROR_MARKER = "PREPROCESSING_ERROR";
+const API_ERROR_INVALID_KEY_MARKER = "API_ERROR_INVALID_KEY";
+const API_ERROR_QUOTA_MARKER = "API_ERROR_QUOTA";
 
 // --- Exported Function ---
 /**
@@ -64,29 +66,25 @@ export async function extractMathText(input: ExtractMathTextInput): Promise<Extr
   try {
     console.log("Starting image preprocessing...");
     preprocessedImageDataUri = await preprocessImageForOcr(input.imageDataUri);
-    console.log("Image preprocessing successful (or skipped by placeholder).");
+    console.log("Image preprocessing successful.");
   } catch (error) {
     console.error("Error during image preprocessing:", error);
-    // Decide if we should proceed with the original image or fail
-    // For now, let's try proceeding with the original image but log the error
-    // return { extractedText: PREPROCESSING_ERROR_MARKER }; // Option to fail hard
-    preprocessedImageDataUri = input.imageDataUri; // Fallback to original
-    console.warn("Preprocessing failed, falling back to original image for OCR.");
+    // Fail if preprocessing fails critically
+    return { extractedText: PREPROCESSING_ERROR_MARKER };
   }
 
   if (!preprocessedImageDataUri) {
-      console.error("Preprocessed image data URI is missing after processing/fallback.");
+      console.error("Preprocessed image data URI is missing after processing.");
       return { extractedText: OCR_PROCESSING_ERROR_MARKER };
   }
 
-  // Call the Genkit flow with the potentially preprocessed image
+  // Call the Genkit flow with the preprocessed image
   const flowResult = await extractMathTextFlow({ imageDataUri: preprocessedImageDataUri });
 
   // Return the flow result along with the preprocessed image URI
   return {
     ...flowResult,
-    // Only include preprocessed URI if it's actually different (not just the placeholder fallback)
-    preprocessedImageUri: preprocessedImageDataUri !== input.imageDataUri ? preprocessedImageDataUri : undefined,
+    preprocessedImageUri: preprocessedImageDataUri, // Always return the (potentially modified) URI used
   };
 }
 
@@ -103,20 +101,41 @@ const prompt = ai.definePrompt({
     schema: z.object({ extractedText: ExtractedTextSchema }),
   },
   model: 'googleai/gemini-1.5-flash', // Use 1.5 Flash as it's good with vision and faster/cheaper than Pro
-  // Simplified prompt to avoid complex formatting issues in the template string
-  prompt: `TASK: Analyze the provided image. Extract only the primary mathematical expression(s). Ignore all non-mathematical content. Be precise.
+  prompt: `TASK: Analyze the provided image meticulously. Your *only* goal is to identify and extract the primary mathematical expression(s) present, whether printed or handwritten. Be extremely precise and robust against noise and variations.
 
 IMAGE: {{media url=imageDataUri}}
 
-SPECIFIC RULES:
-1. Focus ONLY on math: numbers, variables, operators (+, -, *, /, ^, sqrt, sin, cos, log, etc.), brackets, fractions.
-2. IGNORE ALL non-math text, labels, noise, backgrounds.
-3. Interpret handwriting contextually (e.g., 'l' as '1', 'O' as '0', 'S' as '5', 't' as '+'). Use '*' for multiplication if needed, prefer implicit (2x).
-4. Preserve structure: Use '/' for fractions, '^' for exponents, '_' for subscripts, 'sqrt()' for square roots.
-5. Output Format:
-   - Success: Return ONLY the extracted math expression as plain text. Example: 2x + 3y = 7
-   - Failure (No Math Found/Unclear): Return the exact string: NO_TEXT_FOUND
-   - DO NOT add explanations or markdown.
+CRITICAL INSTRUCTIONS:
+
+1.  **EXTREME FOCUS ON MATH:** Extract *only* mathematical content: numbers, variables (x, y, z, a, b, c, n, etc.), standard function names (sin, cos, tan, log, ln, lim, sum, int), operators (+, -, *, /, ^, √, ∑, ∫, ∂, ∞, ≈, ≠, ≤, ≥, ∈, ∉, ∀, ∃, ∴, ∵), equals signs (=), parentheses/brackets (), fraction bars, decimal points, commas (only if clearly part of numbers like 1,000).
+2.  **AGGRESSIVELY IGNORE NON-MATH:** Completely disregard *all* surrounding elements: question numbers (like "1.", "Q2:"), instructions ("Solve for x:", "Simplify:"), descriptive text, labels, names, dates, background noise, paper lines/grids, shadows, fingers, page edges, watermarks, or any other visual clutter. If multiple unrelated items are present, isolate *only* the math expression.
+3.  **HANDWRITING INTERPRETATION (Mathematical Context is KEY):**
+    *   Interpret ambiguous characters based on *mathematical likelihood*:
+        *   'l' is likely '1'.
+        *   'O' is likely '0'.
+        *   'S' is likely '5'.
+        *   'B' is likely '8'.
+        *   'Z' is likely '2'.
+        *   'g', 'q' are likely '9'.
+        *   't' near numbers/variables is likely '+'.
+        *   'x' could be a variable or a multiplication sign ('*'). Use '*' if explicit or clearly between numbers (e.g., 3 * 4). Prefer implicit multiplication for variables (e.g., '2x', 'ab'). If ambiguous, lean towards 'x' as a variable unless context strongly suggests multiplication. Use '√' for square roots (NOT 'sqrt').
+    *   Handle variations: Connect broken character strokes if context implies a single character. Interpret cursive or stylized writing in a mathematical context.
+4.  **PRESERVE STRUCTURE (Standard ASCII/Unicode Math):**
+    *   Maintain the original mathematical structure precisely.
+    *   Fractions: Use 'numerator/denominator'. Parenthesize numerator/denominator if complex (e.g., '(x+1)/(y-2)').
+    *   Exponents: Use '^'. Use parentheses for complex bases or exponents (e.g., '(x+y)^2', 'e^(2x)').
+    *   Subscripts/Superscripts: Use '_' for subscripts (e.g., 'x_1') and '^' for superscripts (exponents).
+    *   Multiplication: Use '*' for explicit multiplication between numbers. Prefer implicit for coefficient/variable (2x) or variable/variable (xy). Use '*' if needed for clarity (e.g., between parenthesized expressions: '(x+1)*(y-2)').
+    *   Greek Letters: Use standard names (e.g., pi, alpha, beta, theta).
+    *   Integrals/Sums: Use 'int' or 'sum' with appropriate limits notation if possible (e.g., 'int(f(x) dx from a to b)', 'sum(i from 1 to n)').
+    *   Limits: Use 'lim' notation (e.g., 'lim(x->0) f(x)').
+    *   Square Roots: Use the actual symbol '√' followed by the expression, possibly in parentheses for clarity (e.g., √16, √(x^2+1)). DO NOT use 'sqrt()'.
+    *   Order of Operations: Respect PEMDAS/BODMAS implicitly through structure.
+5.  **STRICT OUTPUT FORMAT:**
+    *   **Success:** If a clear mathematical expression is extracted, return *only* that expression as a single line of plain text. NO explanation, NO commentary, NO greetings, NO markdown (like \`\`\`), NO "Extracted Text:". Just the math. Example: \`2x + 3y = 7\`
+    *   **Failure (No Math Found):** If the image is blurry, unclear, contains NO discernible mathematical content, or if you CANNOT reliably extract any math expression, return the *exact* string: \`NO_TEXT_FOUND\`
+    *   **Failure (Ambiguity):** If multiple potential math expressions exist and it's ambiguous which is primary, return \`NO_TEXT_FOUND\`.
+    *   **DO NOT GUESS:** If confidence is very low, return \`NO_TEXT_FOUND\`.
 
 Extracted Mathematical Text:`,
 });
@@ -208,11 +227,11 @@ const extractMathTextFlow = ai.defineFlow<
        // Check if the error is related to API key or permissions
        if (errorMsg.includes('API key not valid') || errorMsg.includes('permission denied')) {
            console.error("API Key or Permission Error detected.");
-           return { extractedText: "API_ERROR_INVALID_KEY" }; // Specific marker
+           return { extractedText: API_ERROR_INVALID_KEY_MARKER }; // Specific marker
        }
         if (errorMsg.includes('quota') || errorMsg.includes('Quota')) {
            console.error("Quota Exceeded Error detected.");
-           return { extractedText: "API_ERROR_QUOTA" }; // Specific marker
+           return { extractedText: API_ERROR_QUOTA_MARKER }; // Specific marker
        }
 
        return { extractedText: OCR_PROCESSING_ERROR_MARKER };

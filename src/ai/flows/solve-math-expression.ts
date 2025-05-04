@@ -58,13 +58,13 @@ Follow these instructions PRECISELY:
     *   If it's a calculation (e.g., "3 + 5 * 2"), perform it step-by-step respecting order of operations (PEMDAS/BODMAS).
     *   If it's a solvable equation (e.g., "2x + 3 = 11", "x^2 - 5x + 6 = 0"), find the value(s) of the variable(s). Show the main algebraic steps (isolating variable, factoring, using quadratic formula, simplifying radicals, etc.).
     *   If it's a simple system of linear equations (e.g., "x + y = 5, x - y = 1"), solve for all variables using methods like substitution or elimination, showing steps.
-    *   If it involves standard functions (e.g., "sin(pi/2)", "log10(100)", "sqrt(16)"), evaluate them clearly.
+    *   If it involves standard functions (e.g., "sin(pi/2)", "log10(100)", "sqrt(16)"), evaluate them clearly. Use the actual square root symbol '√' instead of 'sqrt()'. For example, √16.
     *   If it requires basic calculus (e.g., derivative of x^2, integral of 2x), perform the operation and show steps if possible.
 3.  **Format Output as Markdown:**
     *   Use Markdown headings (e.g., \`## Steps\`) or numbered lists (\`1. ...\`, \`2. ...\`) for clarity in showing steps.
-    *   Use standard mathematical notation within the Markdown (e.g., use \`*\`, \`/\`, \`+\`, \`-\`, \`^\` for exponentiation, \`sqrt()\`). Use fractions where appropriate (e.g., \`1/2\`). Use standard function names (\`sin\`, \`cos\`, \`log\`, \`ln\`). Render math inline using backticks (\`...\`) for simple expressions or use standard text.
+    *   Use standard mathematical notation within the Markdown (e.g., use \`*\`, \`/\`, \`+\`, \`-\`, \`^\` for exponentiation, '√' for square root). Use fractions where appropriate (e.g., \`1/2\`). Use standard function names (\`sin\`, \`cos\`, \`log\`, \`ln\`). Render math inline using backticks (\`...\`) for simple expressions or use standard text.
     *   Explain the *method* being used briefly if complex (e.g., \`1. Apply quadratic formula: ...\`, \`2. Isolate x by subtracting 3 from both sides: ...\`).
-4.  **State Final Answer(s):** Clearly label the final result(s) using Markdown emphasis like \`**Final Answer:** ...\` or \`**Solution:** ...\`. For equations, state all valid solutions (e.g., \`x = 4\`, or \`x = 2, x = 3\`). Simplify answers fully (e.g., \`x = sqrt(2)\`, not \`x = sqrt(8)/2\`).
+4.  **State Final Answer(s):** Clearly label the final result(s) using Markdown emphasis like \`**Final Answer:** ...\` or \`**Solution:** ...\`. For equations, state all valid solutions (e.g., \`x = 4\`, or \`x = 2, x = 3\`). Simplify answers fully (e.g., \`x = √2\`, not \`x = √8/2\`).
 5.  **Handle Unsolvable/Invalid Cases (Format as Error/Conclusion):**
     *   If the expression is mathematically invalid (e.g., "2 + = 5", division by zero like "1/(2-2)"), state clearly: \`**Error:** The expression is mathematically invalid because [specific reason].\`
     *   If the input string itself does not appear to be a parsable mathematical expression, state: \`**Error:** The input does not appear to be a valid mathematical expression.\`
@@ -91,6 +91,7 @@ const solveMathExpressionFlow = ai.defineFlow<
   // Constants defined in the component importing this flow
   const NO_TEXT_FOUND_MESSAGE = "NO_TEXT_FOUND";
   const OCR_PROCESSING_ERROR_MESSAGE = "OCR_PROCESSING_ERROR";
+  const MATH_AI_ERROR_PREFIX = "**Error:**";
 
   // Basic input validation - Check against known upstream failure states
   const trimmedExpression = input.expression?.trim();
@@ -100,7 +101,7 @@ const solveMathExpressionFlow = ai.defineFlow<
                      trimmedExpression === NO_TEXT_FOUND_MESSAGE ? "indicates no text was found" :
                      "indicates an OCR processing error occurred";
       console.warn(`Solve flow received invalid input: ${reason}. Expression: "${input.expression}"`);
-      return { solution: `**Error:** Cannot solve. The input expression ${reason}. Please provide a valid mathematical expression, possibly by correcting the OCR output.` };
+      return { solution: `${MATH_AI_ERROR_PREFIX} Cannot solve. The input expression ${reason}. Please provide a valid mathematical expression, possibly by correcting the OCR output.` };
   }
 
   try {
@@ -111,7 +112,7 @@ const solveMathExpressionFlow = ai.defineFlow<
       if (!output || output.solution === null || output.solution === undefined) {
           // This indicates an unexpected failure in the AI generation itself
           console.error("AI failed to generate a solution for:", trimmedExpression);
-          return { solution: "**Error:** The AI solver failed to generate a response. Please try again." };
+          return { solution: `${MATH_AI_ERROR_PREFIX} The AI solver failed to generate a response. Please try again.` };
       }
 
       console.log("Solver returned (Markdown):", output.solution);
@@ -125,6 +126,6 @@ const solveMathExpressionFlow = ai.defineFlow<
       console.error("Error occurred during solveMathExpressionFlow for:", trimmedExpression, error);
       // Handle potential errors thrown by the Genkit flow/prompt execution
       const errorMsg = error instanceof Error ? error.message : "An unknown error occurred during solving.";
-      return { solution: `**Error:** An unexpected error occurred while trying to solve the expression: ${errorMsg}` };
+      return { solution: `${MATH_AI_ERROR_PREFIX} An unexpected error occurred while trying to solve the expression: ${errorMsg}` };
   }
 });
