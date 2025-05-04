@@ -14,14 +14,14 @@ import {z} from 'genkit';
 const FixOcrErrorsInputSchema = z.object({
   ocrText: z
     .string()
-    .describe('The potentially imperfect OCR-extracted text from the math expression image (could be printed or handwritten).'),
+    .describe('The potentially imperfect OCR-extracted text from the math expression image (could be printed or handwritten). Should not be "NO_TEXT_FOUND" or "OCR_PROCESSING_ERROR".'),
 });
 export type FixOcrErrorsInput = z.infer<typeof FixOcrErrorsInputSchema>;
 
 const FixOcrErrorsOutputSchema = z.object({
   correctedText: z
     .string()
-    .describe('The corrected math expression text, prioritizing mathematical validity and fixing common OCR/handwriting errors.'),
+    .describe('The corrected math expression text, prioritizing mathematical validity and fixing common OCR/handwriting errors. Returns the original text if no corrections are confidently identified.'),
 });
 export type FixOcrErrorsOutput = z.infer<typeof FixOcrErrorsOutputSchema>;
 
@@ -42,13 +42,13 @@ const prompt = ai.definePrompt({
     schema: z.object({
       correctedText: z
         .string()
-        .describe('The corrected math expression text, prioritizing mathematical validity and fixing common OCR/handwriting errors.'),
+        .describe('The corrected math expression text, prioritizing mathematical validity and fixing common OCR/handwriting errors. Returns the original text if no corrections are confidently identified.'),
     }),
   },
-  // Consider using a slightly more powerful model if simple correction fails often
+  // Using a slightly more capable model might help with nuanced corrections
   // model: 'googleai/gemini-1.5-flash',
-  prompt: `You are an expert in correcting OCR errors in mathematical expressions, especially those extracted from HANDWRITTEN text.
-Your task is to analyze the given OCR text and correct common misinterpretations to produce the most likely intended, mathematically valid expression.
+  prompt: `You are an expert in correcting Optical Character Recognition (OCR) errors in mathematical expressions, including those extracted from HANDWRITTEN sources.
+Your task is to analyze the given OCR text and correct common misinterpretations to produce the most likely *intended*, mathematically plausible expression.
 
 Common OCR & Handwriting Errors to Look For:
 - 'O' vs '0' (zero)
@@ -58,18 +58,20 @@ Common OCR & Handwriting Errors to Look For:
 - 'Z' vs '2'
 - 'g' vs '9' vs 'q'
 - 't' vs '+'
-- 'x' (variable) vs '*' (multiplication) - infer based on context. Standard math usually uses implicit multiplication or a dot (·), but '*' might appear from OCR. Convert '*' to implicit or standard notation if appropriate.
-- Misplaced or missing operators (+, -, =, etc.)
-- Incorrectly recognized exponents or subscripts.
+- 'x' (variable) vs '*' (multiplication) - Infer based on context. Standard math often uses implicit multiplication (e.g., '2x') or a dot (·). If '*' appears, convert it to implicit or standard notation if it clearly represents multiplication between terms (e.g., '2*x' -> '2x'). Keep '*' if it's between numbers (e.g., '3 * 4').
+- Misplaced or missing operators (+, -, =, etc.) - Add or correct operators *only* if the mathematical structure strongly implies it.
+- Incorrectly recognized exponents (e.g., 'x^ 2' -> 'x^2') or subscripts.
 - Confusion between similar symbols like '-' and '–' (en dash). Standardize to '-'.
+- Broken fractions (e.g., '1 / 2' -> '1/2').
 
 Instructions:
 1.  Analyze the input OCR Text: \`{{{ocrText}}}\`
-2.  Identify potential OCR or handwriting misreads based on the common errors listed above and mathematical context.
-3.  Correct these errors to form a coherent and mathematically valid expression.
-4.  If the input looks like a standard variable (like 'x' or 'y'), keep it as a variable unless it's clearly meant to be multiplication in context (e.g., "3 * 4" should remain, but "2x" should remain "2x", not "2*").
-5.  Prioritize making the expression mathematically plausible. For example, if you see "2 + = 5", it's likely meant to be "2 + x = 5" or "2 + 3 = 5", infer based on visual similarity if possible, but prefer leaving a placeholder like 'x' if unsure. If it's completely nonsensical and cannot be reasonably corrected, return the original text.
-6.  Output ONLY the corrected mathematical expression. Do not add explanations.
+2.  Identify potential OCR or handwriting misreads based on the common errors and mathematical context.
+3.  Correct ONLY the errors that you are reasonably confident about, aiming for a more mathematically valid or standard representation.
+4.  If a character looks like a standard variable (like 'x', 'y', 'a', 'b'), KEEP it as a variable unless the context overwhelmingly suggests it's a number or operator (e.g., '2x' should remain '2x', not '2 * something').
+5.  Prioritize making the expression mathematically plausible. If a correction makes the expression nonsensical, revert it.
+6.  If the input text is already mathematically valid and clear, or if you are uncertain about potential corrections, return the ORIGINAL text unchanged. Do not force corrections.
+7.  Output ONLY the corrected (or original) mathematical expression. Do not add explanations, introductions, or markdown formatting.
 
 OCR Text:
 \`{{{ocrText}}}\`
@@ -85,18 +87,36 @@ const fixOcrErrorsFlow = ai.defineFlow<
   inputSchema: FixOcrErrorsInputSchema,
   outputSchema: FixOcrErrorsOutputSchema,
 }, async input => {
-  // Handle cases where OCR might have produced "NO_TEXT_FOUND" or similar upstream
-  if (!input.ocrText || input.ocrText === "NO_TEXT_FOUND" || input.ocrText === "OCR Error.") {
-    return { correctedText: input.ocrText || "" }; // Pass through the upstream status/error
+  // Constants defined in the component importing this flow
+  const NO_TEXT_FOUND_MESSAGE = "NO_TEXT_FOUND";
+  const OCR_PROCESSING_ERROR_MESSAGE = "OCR_PROCESSING_ERROR";
+
+  // Handle cases where OCR might have produced known failure states upstream
+  if (!input.ocrText || input.ocrText === NO_TEXT_FOUND_MESSAGE || input.ocrText === OCR_PROCESSING_ERROR_MESSAGE) {
+    console.warn(`Skipping correction for upstream status: "${input.ocrText}"`);
+    // Return empty string as corrected text cannot be generated from these states.
+    return { correctedText: "" };
   }
 
-  const {output} = await prompt(input);
+  try {
+    console.log(`Calling correction model with text: "${input.ocrText}"`);
+    const {output} = await prompt(input);
 
-  // Basic fallback if AI fails unexpectedly
-  if (!output || !output.correctedText) {
-      console.warn("Correction flow returned null/undefined output. Returning original text.");
+    // Basic fallback if AI fails unexpectedly
+    if (!output || output.correctedText === null || output.correctedText === undefined) {
+        console.warn("Correction flow returned null/undefined output. Returning original text.");
+        return { correctedText: input.ocrText };
+    }
+
+    console.log(`Correction model returned: "${output.correctedText}"`);
+    return output;
+
+   } catch (error) {
+      console.error("Error occurred during fixOcrErrorsFlow for:", input.ocrText, error);
+      const errorMsg = error instanceof Error ? error.message : "An unknown error occurred during correction.";
+      // Fallback to the original text if the correction flow itself fails
+      // Log the error but don't propagate it in the 'correctedText' field.
+      // The UI should show the original OCR text in the editable field.
       return { correctedText: input.ocrText };
   }
-
-  return output;
 });
