@@ -13,6 +13,8 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Wand2, Eraser, BrainCircuit } from 'lucide-react'; // Added BrainCircuit icon
 import { useToast } from "@/hooks/use-toast";
 
+const NO_TEXT_FOUND_MESSAGE = "NO_TEXT_FOUND"; // Constant for the specific message
+
 export function MathSolver() {
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [ocrText, setOcrText] = useState<string>('');
@@ -33,39 +35,64 @@ export function MathSolver() {
       setSolution('');
       setIsLoadingOcr(true);
 
+      console.log("Starting image upload process...");
+
       // Convert file to data URI for Genkit Vision model
       const reader = new FileReader();
       reader.readAsDataURL(uploadedFile);
       reader.onload = async () => {
           const imageDataUri = reader.result as string;
+          console.log("Image converted to data URI (first 100 chars):", imageDataUri.substring(0, 100));
           setImageUrl(imageDataUri); // Set image preview immediately
           setFile(uploadedFile);
 
           try {
-              // --- Real OCR Call ---
+              console.log("Calling extractMathText flow...");
               const ocrResult = await extractMathText({ imageDataUri });
-              setOcrText(ocrResult.extractedText || "OCR failed to extract text.");
-              if (ocrResult.extractedText) {
+              console.log("OCR Result:", ocrResult);
+
+              const extracted = ocrResult.extractedText?.trim(); // Trim whitespace
+
+              if (extracted && extracted !== NO_TEXT_FOUND_MESSAGE) {
+                  setOcrText(extracted);
+                  toast({
+                      title: "Text Extracted",
+                      description: "Successfully extracted text from the image.",
+                  });
                   // Automatically trigger correction after successful OCR
-                  handleCorrection(ocrResult.extractedText);
-              } else {
-                   toast({
+                  handleCorrection(extracted);
+              } else if (extracted === NO_TEXT_FOUND_MESSAGE) {
+                  setOcrText(""); // Keep OCR text empty
+                  setError("Could not find any mathematical text in the image. Please try a clearer image or one with a distinct math expression.");
+                  toast({
                       title: "OCR Failed",
-                      description: "Could not extract text from the image.",
+                      description: "No mathematical text found in the image.",
+                      variant: "destructive",
+                  });
+              }
+               else {
+                  // Handle unexpected empty or null result
+                  setOcrText("");
+                  setError("OCR failed to extract text. The response was empty. Please try again.");
+                  toast({
+                      title: "OCR Error",
+                      description: "Text extraction failed unexpectedly.",
                       variant: "destructive",
                   });
               }
           } catch (err) {
               console.error("Error extracting text:", err);
-              setError("Failed to extract text from the image. Please try again or ensure the image is clear.");
-              setOcrText("OCR Error.");
+              const errorMsg = err instanceof Error ? err.message : "An unknown error occurred.";
+              setError(`Failed to extract text from the image: ${errorMsg}. Please try again or ensure the image is clear.`);
+              setOcrText("OCR Error."); // Indicate error in the textarea
               toast({
                   title: "OCR Error",
-                  description: "An error occurred during text extraction.",
+                  description: `An error occurred during text extraction: ${errorMsg}`,
                   variant: "destructive",
               });
           } finally {
               setIsLoadingOcr(false);
+              console.log("Finished OCR process.");
           }
       };
       reader.onerror = (error) => {
@@ -82,6 +109,8 @@ export function MathSolver() {
 
   const handleCorrection = async (textToCorrect: string) => {
       if (!textToCorrect) {
+        // This case should ideally not be hit if handleImageUpload filters correctly
+        console.warn("handleCorrection called with empty text.");
         setError("No text to correct.");
         setIsLoadingCorrection(false); // Ensure loading stops if no text
         return;
@@ -89,42 +118,57 @@ export function MathSolver() {
       setError(null);
       setIsLoadingCorrection(true);
       setSolution(''); // Clear previous solution when correcting
+      console.log("Calling fixOcrErrors flow with text:", textToCorrect);
 
       try {
           const result = await fixOcrErrors({ ocrText: textToCorrect });
+          console.log("Correction Result:", result);
           setCorrectedText(result.correctedText);
-          // Automatically trigger solving after correction
-          // handleSolve(result.correctedText); // Optional: Decide if auto-solve is desired
+          toast({
+             title: "Correction Attempted",
+             description: "AI has attempted to correct the OCR text.",
+          });
+          // Optional: Decide if auto-solve is desired after correction
+          // handleSolve(result.correctedText);
       } catch (err) {
           console.error("Error correcting OCR text:", err);
-          setError("Failed to correct OCR text. You can edit it manually.");
+          const errorMsg = err instanceof Error ? err.message : "An unknown error occurred.";
+          setError(`Failed to correct OCR text: ${errorMsg}. You can edit it manually.`);
           setCorrectedText(textToCorrect); // Fallback to original OCR text on error
           toast({
               title: "Correction Failed",
-              description: "Could not automatically correct the text. Please edit manually.",
+              description: `Could not automatically correct the text: ${errorMsg}. Please edit manually.`,
               variant: "destructive",
           });
       } finally {
           setIsLoadingCorrection(false);
+          console.log("Finished correction process.");
       }
   };
 
 
   const handleSolve = async (equation: string) => {
-    if (!equation?.trim()) {
+    const trimmedEquation = equation?.trim();
+    if (!trimmedEquation) {
         setError("No equation to solve. Please upload an image or enter text.");
+        toast({
+            title: "Missing Equation",
+            description: "Enter or extract an equation first.",
+            variant: "destructive",
+        });
         return;
     }
     setError(null);
     setSolution(''); // Clear previous solution before solving
     setIsLoadingSolution(true);
+    console.log("Calling solveMathExpression flow with equation:", trimmedEquation);
     try {
-        // --- Real Solver Call ---
-        const result = await solveMathExpression({ expression: equation });
+        const result = await solveMathExpression({ expression: trimmedEquation });
+        console.log("Solver Result:", result);
         setSolution(result.solution);
          toast({
-              title: "Solution Found",
-              description: "The equation has been solved.",
+              title: "Solution Generated",
+              description: "The equation has been processed.",
          });
     } catch (err) {
         console.error("Error solving equation:", err);
@@ -137,6 +181,7 @@ export function MathSolver() {
           });
     } finally {
         setIsLoadingSolution(false);
+        console.log("Finished solving process.");
     }
   };
 
@@ -150,12 +195,23 @@ export function MathSolver() {
     setIsLoadingOcr(false);
     setIsLoadingCorrection(false);
     setIsLoadingSolution(false);
+    console.log("Cleared all fields.");
+     toast({
+        title: "Cleared",
+        description: "All fields have been reset.",
+    });
   };
 
   const handleTextChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setCorrectedText(e.target.value);
     // Clear solution when text is manually changed
-    setSolution('');
+    if (solution) {
+        setSolution('');
+    }
+    // Optionally clear error if user starts typing
+    if (error) {
+        setError(null);
+    }
   };
 
   return (
@@ -207,7 +263,7 @@ export function MathSolver() {
                 AI extracts text, then corrects common OCR errors. Edit below if needed.
              </CardDescription>
           </CardHeader>
-          <CardContent className="relative flex flex-col h-full">
+          <CardContent className="relative flex flex-col h-full min-h-[300px]"> {/* Ensure minimum height */}
              {/* Loading overlay */}
             {(isLoadingOcr || isLoadingCorrection) && (
                <div className="absolute inset-0 bg-background/80 flex items-center justify-center z-10 rounded-md">
@@ -237,9 +293,10 @@ export function MathSolver() {
                         id="correctedText"
                         value={correctedText}
                         onChange={handleTextChange}
-                        placeholder="Corrected text will appear here. Edit if needed."
+                        placeholder={ocrText ? "Corrected text appears here. Edit if needed." : "Upload an image first..."}
                         className="min-h-[100px] focus:ring-primary focus:border-primary resize-none h-full"
                         aria-label="Editable Corrected Text"
+                        disabled={isLoadingOcr || isLoadingCorrection} // Disable while loading OCR/Correction
                      />
                  </div>
             </div>
@@ -273,7 +330,7 @@ export function MathSolver() {
             <CardTitle>3. Solution</CardTitle>
              <CardDescription>The AI-powered solution appears below.</CardDescription>
           </CardHeader>
-          <CardContent className="relative flex-grow flex flex-col min-h-[200px]">
+          <CardContent className="relative flex-grow flex flex-col min-h-[300px]"> {/* Ensure minimum height */}
              {/* Loading overlay */}
             {isLoadingSolution && (
                  <div className="absolute inset-0 bg-background/80 flex items-center justify-center z-10 rounded-md m-6 mt-0 mb-4">
@@ -282,12 +339,12 @@ export function MathSolver() {
                  </div>
             )}
             {/* Solution display area takes available space */}
-            <div className="bg-secondary/30 p-4 rounded-md flex-grow flex items-center justify-center overflow-auto">
+            <div className="bg-secondary/30 p-4 rounded-md flex-grow flex items-center justify-center overflow-auto min-h-[150px]"> {/* Min height for content */}
               {solution ? (
                 <pre className="text-sm font-medium whitespace-pre-wrap text-left w-full">{solution}</pre>
               ) : (
                 <p className="text-muted-foreground text-center">
-                  {isLoadingSolution ? 'Calculating...' : 'Solution will appear here.'}
+                  {isLoadingSolution ? 'Calculating...' : (correctedText ? 'Ready to solve. Click "Solve Equation".' : 'Solution will appear here.')}
                 </p>
               )}
             </div>

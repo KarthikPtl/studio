@@ -23,7 +23,7 @@ export type ExtractMathTextInput = z.infer<typeof ExtractMathTextInputSchema>;
 const ExtractMathTextOutputSchema = z.object({
   extractedText: z
     .string()
-    .describe('The text extracted from the math expression image.'),
+    .describe('The text extracted from the math expression image, or "NO_TEXT_FOUND" if none could be reliably extracted.'),
 });
 export type ExtractMathTextOutput = z.infer<typeof ExtractMathTextOutputSchema>;
 
@@ -46,13 +46,18 @@ const prompt = ai.definePrompt({
     schema: z.object({
       extractedText: z
         .string()
-        .describe('The text extracted from the math expression image.'),
+        .describe('The text extracted from the math expression image, or "NO_TEXT_FOUND" if none could be reliably extracted.'),
     }),
   },
   model: 'googleai/gemini-pro-vision', // Use Vision model
-  prompt: `Extract the mathematical expression from the provided image as accurately as possible. Focus only on the mathematical characters, symbols, numbers, and variables.
+  prompt: `Carefully analyze the provided image and extract any mathematical expression present.
+Focus ONLY on the mathematical characters, symbols, numbers, and variables (like x, y, etc.).
+Ignore any surrounding text, background elements, or handwriting that is not part of a clear mathematical expression.
 
 Image: {{media url=imageDataUri}}
+
+If a clear mathematical expression is found, output ONLY the extracted text.
+If no mathematical expression can be reliably extracted (e.g., image is blurry, unclear, or contains no math), output the exact string "NO_TEXT_FOUND".
 
 Extracted Text:`,
 });
@@ -66,5 +71,14 @@ const extractMathTextFlow = ai.defineFlow<
   outputSchema: ExtractMathTextOutputSchema,
 }, async input => {
   const { output } = await prompt(input);
-  return output!;
+
+  // Ensure output is not null/undefined, fallback if necessary
+  if (!output || output.extractedText === null || output.extractedText === undefined) {
+      console.warn("OCR flow returned null/undefined output. Defaulting to NO_TEXT_FOUND.");
+      return { extractedText: "NO_TEXT_FOUND" };
+  }
+  // Trim whitespace just in case
+  output.extractedText = output.extractedText.trim();
+
+  return output;
 });
