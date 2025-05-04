@@ -1,11 +1,16 @@
 import type { Metadata } from 'next';
 import { GeistSans } from 'geist/font/sans';
-import { GeistMono } from 'geist/font/mono';
+import { Inter } from 'next/font/google'; // Import Inter
 import 'katex/dist/katex.min.css'; // Import KaTeX CSS
 import './globals.css';
 import { Toaster } from "@/components/ui/toaster";
-import { Card, CardContent } from '@/components/ui/card'; // Import Card for header styling
+import { Card, CardContent } from '@/components/ui/card';
 
+// Configure Inter font
+const inter = Inter({
+  subsets: ['latin'],
+  variable: '--font-inter', // Define CSS variable
+});
 
 export const metadata: Metadata = {
   title: 'MathSnap Solver',
@@ -18,15 +23,16 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={`${GeistSans.variable} ${GeistMono.variable}`}>
-      <body className={`antialiased bg-background text-foreground`}>
+    <html lang="en" className={`${GeistSans.variable} ${inter.variable}`}> {/* Add Inter variable */}
+      <body className={`antialiased bg-background text-foreground font-sans`}> {/* Use sans font family */}
         <header className="container mx-auto p-4 md:py-6">
-           <Card className="shadow-md rounded-lg border border-border bg-card">
-             <CardContent className="p-4 text-center">
-              <h1 className="text-xl md:text-2xl font-bold text-foreground">
+           {/* Adjusted header styling: more padding, slightly less shadow */}
+           <Card className="shadow-md rounded-xl border border-border bg-card">
+             <CardContent className="p-5 md:p-6 text-center"> {/* Increased padding */}
+              <h1 className="text-xl md:text-2xl font-semibold text-foreground tracking-tight"> {/* Use font-semibold */}
                  Math Snap Solver ✨
               </h1>
-               <p className="text-sm md:text-base text-muted-foreground">
+               <p className="text-sm md:text-base text-muted-foreground mt-1"> {/* Added margin-top */}
                  Snap It. Solve It. Understand It.
                </p>
              </CardContent>

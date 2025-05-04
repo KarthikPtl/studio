@@ -24,16 +24,20 @@ export function ImageUploader({ onImageUpload, imageUrl, setImageUrl, setFile, c
       setIsDragging(false);
       if (acceptedFiles && acceptedFiles.length > 0) {
         const file = acceptedFiles[0];
-        // No need for FileReader here if handleImageUpload expects a File
-        setImageUrl(URL.createObjectURL(file)); // Create temporary URL for preview
+        // Clean up previous blob URL if exists
+        if (imageUrl && imageUrl.startsWith('blob:')) {
+            URL.revokeObjectURL(imageUrl);
+        }
+        const newImageUrl = URL.createObjectURL(file); // Create temporary URL for preview
+        setImageUrl(newImageUrl);
         setFile(file);
         onImageUpload(file); // Pass the File object directly
       }
     },
-    [onImageUpload, setImageUrl, setFile]
+    [imageUrl, onImageUpload, setImageUrl, setFile] // Added imageUrl to dependency array
   );
 
-   // Cleanup temporary URL when component unmounts or imageUrl changes
+   // Cleanup temporary URL when component unmounts or imageUrl is explicitly cleared
    React.useEffect(() => {
      return () => {
        if (imageUrl && imageUrl.startsWith('blob:')) {
@@ -63,10 +67,11 @@ export function ImageUploader({ onImageUpload, imageUrl, setImageUrl, setFile, c
   };
 
   return (
-    <Card className={cn("border-2 border-dashed hover:border-primary transition-colors h-full", isDragging || isDragActive ? "border-primary bg-accent/10" : "", className)}>
+    // Increased radius, subtle hover effect
+    <Card className={cn("border-2 border-dashed hover:border-primary/80 transition-colors h-full rounded-xl", isDragging || isDragActive ? "border-primary bg-primary/5" : "border-border/70", className)}>
       <CardContent
         {...getRootProps()}
-        className={cn("relative flex flex-col items-center justify-center p-6 min-h-[200px] cursor-pointer text-center h-full")} // Added h-full
+        className={cn("relative flex flex-col items-center justify-center p-6 min-h-[200px] cursor-pointer text-center h-full rounded-xl")} // Added rounded-xl
       >
         <input {...getInputProps()} />
         {imageUrl ? (
@@ -76,27 +81,28 @@ export function ImageUploader({ onImageUpload, imageUrl, setImageUrl, setFile, c
               alt="Uploaded Math Expression"
               width={400}
               height={200}
-              className="max-h-[300px] w-auto object-contain rounded-md"
+              className="max-h-[300px] w-auto object-contain rounded-lg shadow-md" // Increased radius, added shadow
               data-ai-hint="math equation"
             />
+             {/* Refined clear button */}
             <Button
               variant="ghost"
               size="icon"
               onClick={handleClear}
-              className="absolute top-2 right-2 bg-background/80 hover:bg-destructive/80 hover:text-destructive-foreground rounded-full z-10" // Ensure button is clickable
+              className="absolute top-3 right-3 bg-background/80 hover:bg-destructive/10 hover:text-destructive rounded-full z-10 h-7 w-7" // Smaller, adjusted position, destructive hover
               aria-label="Clear image"
             >
               <X className="h-4 w-4" />
             </Button>
-            <p className="mt-4 text-sm text-muted-foreground">Drag 'n' drop a new image here, or click to replace</p>
+            <p className="mt-4 text-sm text-muted-foreground">Drag 'n' drop or click to replace</p>
           </>
         ) : (
           <div className="flex flex-col items-center gap-2 text-muted-foreground">
-            <UploadCloud className="h-12 w-12" />
-            <p className="font-semibold text-foreground">
-              {isDragActive ? "Drop the image here..." : "Drag 'n' drop an image here, or click to select"}
+            <UploadCloud className="h-10 w-10 text-gray-400" /> {/* Adjusted icon size/color */}
+            <p className="font-medium text-sm text-foreground"> {/* Adjusted text */}
+              {isDragActive ? "Drop the image here..." : "Drag & drop image, or click to select"}
             </p>
-            <p className="text-xs">Supports JPG, PNG</p>
+            <p className="text-xs text-gray-500">Supports JPG, PNG (Max 5MB)</p> {/* Added size hint */}
           </div>
         )}
       </CardContent>

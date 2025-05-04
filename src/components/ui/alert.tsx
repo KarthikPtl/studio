@@ -1,10 +1,12 @@
 import * as React from "react"
 import { cva, type VariantProps } from "class-variance-authority"
+import { AlertCircle, Info } from 'lucide-react' // Import icons
 
 import { cn } from "@/lib/utils"
 
 const alertVariants = cva(
-  "relative w-full rounded-lg border p-4 [&>svg~*]:pl-7 [&>svg+div]:translate-y-[-3px] [&>svg]:absolute [&>svg]:left-4 [&>svg]:top-4 [&>svg]:text-foreground",
+  // Added icon positioning
+  "relative w-full rounded-lg border p-4 pl-10 [&>svg~*]:pl-2 [&>svg+div]:translate-y-[-3px] [&>svg]:absolute [&>svg]:left-4 [&>svg]:top-4 [&>svg]:text-foreground",
   {
     variants: {
       variant: {
@@ -22,13 +24,17 @@ const alertVariants = cva(
 const Alert = React.forwardRef<
   HTMLDivElement,
   React.HTMLAttributes<HTMLDivElement> & VariantProps<typeof alertVariants>
->(({ className, variant, ...props }, ref) => (
+>(({ className, variant, children, ...props }, ref) => (
   <div
     ref={ref}
     role="alert"
     className={cn(alertVariants({ variant }), className)}
     {...props}
-  />
+  >
+    {/* Add default icon based on variant */}
+    {variant === "destructive" ? <AlertCircle className="h-4 w-4" /> : <Info className="h-4 w-4" />}
+    {children}
+  </div>
 ))
 Alert.displayName = "Alert"
 

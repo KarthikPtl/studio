@@ -1,4 +1,5 @@
 import type { Config } from "tailwindcss";
+import { fontFamily } from "tailwindcss/defaultTheme"; // Import default theme fonts
 
 export default {
     darkMode: ["class"],
@@ -9,6 +10,10 @@ export default {
   ],
   theme: {
   	extend: {
+      fontFamily: {
+        // Add Inter to the sans-serif stack
+        sans: ["var(--font-inter)", ...fontFamily.sans],
+      },
   		colors: {
   			background: 'hsl(var(--background))',
   			foreground: 'hsl(var(--foreground))',
@@ -62,10 +67,12 @@ export default {
   			}
   		},
   		borderRadius: {
-  			lg: 'var(--radius)',
-  			md: 'calc(var(--radius) - 2px)',
-  			sm: 'calc(var(--radius) - 4px)',
-        xl: 'calc(var(--radius) + 4px)' // Added for larger radius option
+  			lg: 'calc(var(--radius) - 2px)', // Adjusted default lg
+        md: 'calc(var(--radius) - 4px)', // Adjusted default md
+        sm: 'calc(var(--radius) - 6px)', // Adjusted default sm
+        xl: 'var(--radius)', // Set xl to root radius (1rem)
+        '2xl': 'calc(var(--radius) + 4px)', // Add 2xl option
+        '3xl': 'calc(var(--radius) + 8px)', // Add 3xl option
   		},
   		keyframes: {
   			'accordion-down': {
@@ -134,6 +141,7 @@ export default {
                fontStyle: 'normal', // Keeping italic via class if needed
              },
              'h1,h2,h3,h4,h5,h6': {
+               fontFamily: `var(--font-geist-sans), ${theme('fontFamily.sans').join(', ')}`, // Explicitly set heading font
                fontWeight: theme('fontWeight.semibold'), // Use theme value
              },
              // Add other non-color structural overrides if needed
